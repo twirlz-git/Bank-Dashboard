@@ -47,6 +47,16 @@ class TrendsAnalyzer:
             except ImportError:
                 logger.error("openai package not installed")
                 self.enabled = False
+        
+        # Initialize historical data generator
+        try:
+            from modules.historical_generator import HistoricalDataGenerator
+            self.hist_generator = HistoricalDataGenerator()
+            self.use_real_data = True
+        except ImportError:
+            logger.warning("HistoricalDataGenerator not available")
+            self.hist_generator = None
+            self.use_real_data = False
 
     def analyze_trends(
         self, 
@@ -71,23 +81,36 @@ class TrendsAnalyzer:
         # Calculate date range
         start_date, end_date = self._get_date_range(time_period)
         
-        # Try to fetch real historical data via search
+        # Try to fetch historical data from real files first
         timeline = []
-        search_attempted = False
+        data_source = "mock"
         
-        if use_real_search and self.enabled:
+        if self.use_real_data and self.hist_generator:
+            try:
+                timeline = self.hist_generator.generate_historical_timeline(
+                    bank, product_type, time_period
+                )
+                if timeline:
+                    data_source = "real_data_based"
+                    logger.info(f"Generated timeline from real data: {len(timeline)} points")
+            except Exception as e:
+                logger.warning(f"Historical generation failed: {e}, falling back to mock")
+        
+        # Try real search if enabled
+        if not timeline and use_real_search and self.enabled:
             try:
                 timeline = self._search_and_extract_timeline(
                     bank, product_type, start_date, end_date
                 )
-                search_attempted = True
+                data_source = "web_search"
                 logger.info(f"Real search completed: {len(timeline)} data points found")
             except Exception as e:
                 logger.warning(f"Real search failed: {e}, falling back to mock data")
         
-        # Fallback to mock data if search not used or failed
+        # Fallback to mock data if nothing else worked
         if not timeline:
             timeline = self._generate_mock_timeline(bank, product_type, time_period)
+            data_source = "mock"
             logger.info(f"Using mock data: {len(timeline)} data points")
         
         # Analyze timeline
@@ -104,7 +127,7 @@ class TrendsAnalyzer:
             "analysis": analysis,
             "trend_direction": trend_direction,
             "summary": self._generate_summary(bank, product_type, timeline, analysis, trend_direction),
-            "data_source": "web_search" if search_attempted else "mock",
+            "data_source": data_source,
             "confidence": analysis.get("average_confidence", 0.5)
         }
 
