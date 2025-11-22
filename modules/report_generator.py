@@ -7,6 +7,8 @@ from typing import Dict, Any
 from datetime import datetime
 import pandas as pd
 from openpyxl import Workbook
+from openpyxl.cell import MergedCell
+from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from io import BytesIO
 
@@ -63,10 +65,12 @@ class ReportGenerator:
         # Auto-adjust column widths
         for ws in wb.sheetnames:
             worksheet = wb[ws]
-            for column in worksheet.columns:
+            for col_idx, column in enumerate(worksheet.columns, start=1):
                 max_length = 0
-                column_letter = column[0].column_letter
+                column_letter = get_column_letter(col_idx)
                 for cell in column:
+                    if isinstance(cell, MergedCell):
+                        continue
                     try:
                         if len(str(cell.value)) > max_length:
                             max_length = len(str(cell.value))
