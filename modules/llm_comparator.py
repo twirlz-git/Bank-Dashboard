@@ -32,8 +32,9 @@ class LLMComparator:
         self.api_key = "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"
         # Default to OpenRouter if no base_url is provided
         self.base_url = "https://openrouter.ai/api/v1"
-        # Set a default OpenRouter model (e.g., Gemini Flash is fast/cheap for comparisons)
-        self.model = "tngtech/deepseek-r1t2-chimera:free"
+        # --- MODEL PATCH HERE ---
+        self.model = "google/gemma-3-27b-it:free"
+        # ------------------------
 
         if not self.api_key:
             logger.warning("No API key found. LLM comparison will be disabled.")
@@ -46,13 +47,13 @@ class LLMComparator:
                     api_key=self.api_key,
                     base_url=self.base_url
                 )
-                
+
                 if "openrouter" in self.base_url.lower():
                     self.client.default_headers.update({
                         "HTTP-Referer": "https://github.com/twirlz-git/Bank-Dashboard",
                         "X-Title": "Banking Product Comparator"
                     })
-                    
+
             except ImportError:
                 logger.error("openai package not installed. Run: pip install openai")
                 self.enabled = False
