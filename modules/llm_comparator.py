@@ -31,8 +31,8 @@ class LLMComparator:
         # Prioritize OpenRouter key, fall back to OpenAI key
         self.api_key = "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"
         # Default to OpenRouter if no base_url is provided
-        self.base_url = "https://openrouter.ai/api/
-                self.model = "tngtech/deepseek-r1t2-chimera:free"
+        self.base_url = "https://openrouter.ai/api/v1"
+        self.model = "tngtech/deepseek-r1t2-chimera:free"
         # ------------------------
 
         if not self.api_key:
