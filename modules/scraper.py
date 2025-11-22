@@ -1,84 +1,91 @@
 """
-modules/scraper.py - Web scraping module for collecting current product data
+modules/scraper.py - Data reader module for collecting current product data from local files
 """
 
+import json
 import logging
-import requests
-from typing import Dict, Any, Optional
-from bs4 import BeautifulSoup
-from configs.data_sources import DATA_SOURCES
+from pathlib import Path
+from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
-class WebScraper:
-    """Scrape product data from bank websites"""
-    
+class BankDataReader:
+    """Read product data from local JSON files"""
+
     def __init__(self):
-        self.session = requests.Session()
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-    
-    def scrape_credit_card(self, bank: str, product_type: str = "credit_card") -> Dict[str, Any]:
-        """Scrape credit card data for specific bank"""
-        if bank not in DATA_SOURCES.get(product_type, {}):
-            logger.warning(f"No source configured for {bank}")
-            return self._get_fallback_data(bank, product_type)
-        
-        source = DATA_SOURCES[product_type][bank]
-        return self._scrape_url(source["url"], source.get("selectors", {}), bank)
-    
-    def scrape_deposit(self, bank: str) -> Dict[str, Any]:
-        """Scrape deposit data"""
-        return self.scrape_credit_card(bank, product_type="deposit")
-    
-    def _scrape_url(self, url: str, selectors: Dict[str, str], bank: str) -> Dict[str, Any]:
-        """Generic URL scraping with CSS selectors"""
-        try:
-            response = self.session.get(url, headers=self.headers, timeout=10)
-            response.raise_for_status()
-            
-            soup = BeautifulSoup(response.content, 'html.parser')
-            data = {
-                "bank": bank,
-                "product_name": f"{bank} Product",
-                "source": url
+        self.base_path = Path(__file__).parent.parent / "configs" / "bank_data"
+        self.file_mapping = {
+            "credit_card": {
+                "ВТБ": "4_vtb_credit.json",
+                "Сбер": "6_sberbank_credit.json",
+                "Альфа": "8_alfabank_credit.json",
+                "Тинькофф": "10_tbank_credit.json",
+            },
+            "debit_card": {
+                "ВТБ": "3_vtb_debit.json",
+                "Сбер": "5_sberbank_debit.json",
+                "Альфа": "7_alfabank_debit.json",
+                "Тинькофф": "9_tbank_debit.json",
             }
-            
-            for field_name, selector in selectors.items():
-                try:
-                    element = soup.select_one(selector)
-                    if element:
-                        data[field_name] = element.get_text(strip=True)
-                except Exception as e:
-                    logger.debug(f"Selector error for {field_name}: {e}")
-            
-            return data
-        
+        }
+
+    def get_product_data(self, bank: str, product_type: str) -> Dict[str, Any]:
+        """Load product data for a specific bank and product type"""
+        file_name = self.file_mapping.get(product_type, {}).get(bank)
+        if not file_name:
+            logger.warning(f"No data file configured for {bank} and {product_type}")
+            return self._get_fallback_data(bank, product_type)
+
+        file_path = self.base_path / file_name
+        if not file_path.exists():
+            logger.error(f"Data file not found: {file_path}")
+            return self._get_fallback_data(bank, product_type)
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
         except Exception as e:
-            logger.error(f"Error scraping {url}: {e}")
-            return self._get_fallback_data(bank, "credit_card")
-    
+            logger.error(f"Error reading data file {file_path}: {e}")
+            return self._get_fallback_data(bank, product_type)
+
+    def scrape_credit_card(self, bank: str, product_type: str = "credit_card") -> Dict[str, Any]:
+        """Get credit card data for a specific bank"""
+        return self.get_product_data(bank, "credit_card")
+
+    def scrape_deposit(self, bank: str) -> Dict[str, Any]:
+        """Get deposit data for a specific bank"""
+        # Assuming debit card files contain deposit-like info for now
+        return self.get_product_data(bank, "debit_card")
+
     def _get_fallback_data(self, bank: str, product_type: str) -> Dict[str, Any]:
-        """Return mock data when scraping fails"""
+        """Return mock data when data loading fails"""
+        logger.info(f"Using fallback data for {bank} - {product_type}")
         mock_data = {
             "credit_card": {
-                "bank": bank,
-                "product_name": f"Кредитная карта {bank}",
-                "rate": 19.9,
-                "grace_period": 55,
-                "cashback": 0.02,
-                "annual_fee": 0,
-                "max_limit": 500000
+                "банк": bank,
+                "тип": "Кредитные карты",
+                "карты": [{
+                    "название": f"Кредитная карта {bank} (Fallback)",
+                    "ставка": "N/A", "лимит": "N/A", "грейс_период": "N/A",
+                }]
             },
-            "deposit": {
-                "bank": bank,
-                "product_name": f"Вклад {bank}",
-                "rate": 10.5,
-                "term_months": 12,
-                "min_amount": 1000,
-                "max_amount": 5000000,
-                "replenishment": True
+            "debit_card": {
+                "банк": bank,
+                "тип": "Дебетовые карты",
+                "карты": [{
+                    "название": f"Дебетовая карта {bank} (Fallback)",
+                    "стоимость": "N/A", "кешбек": "N/A",
+                }]
+            },
+            "consumer_loan": {
+                "банк": bank,
+                "тип": "Потребительский кредит",
+                "карты": [{
+                    "название": f"Потребительский кредит {bank} (Fallback)",
+                    "ставка": "N/A", "лимит": "N/A",
+                }]
             }
         }
-        return mock_data.get(product_type, mock_data["credit_card"])
+        # Return a copy to prevent modification of the original mock data
+        return mock_data.get(product_type, {}).copy()
+

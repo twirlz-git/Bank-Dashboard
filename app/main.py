@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from modules.llm_router import LLMRouter
-from modules.scraper import WebScraper
+from modules.scraper import BankDataReader
 from modules.normalizer import DataNormalizer
 from modules.comparator import ProductComparator
 from modules.trends_analyzer import TrendsAnalyzer
@@ -28,7 +28,7 @@ st.set_page_config(
 # Initialize session state
 if 'router' not in st.session_state:
     st.session_state.router = LLMRouter()
-    st.session_state.scraper = WebScraper()
+    st.session_state.scraper = BankDataReader()
     st.session_state.normalizer = DataNormalizer()
     st.session_state.comparator = ProductComparator()
     st.session_state.trends_analyzer = TrendsAnalyzer()
@@ -56,7 +56,7 @@ if "Urgent" in mode:
     with col1:
         bank = st.selectbox(
             "Выберите банк конкурента",
-            ["ВТБ", "Альфа", "Газпром", "Райффайзен"]
+            ["ВТБ", "Альфа", "Тинькофф"]
         )
     
     with col2:
@@ -77,28 +77,31 @@ if "Urgent" in mode:
     
     if analyze_btn:
         with st.spinner("Собираю данные..."):
-            # Route request
-            routing_info = st.session_state.router.route_request(
-                f"Сравнить {product_type} {bank} с Сбером"
-            )
+            # Get competitor data from local files
+            competitor_data = st.session_state.scraper.get_product_data(bank, product_type)
             
-            # Scrape competitor data
-            if product_type == "credit_card":
-                competitor_data = st.session_state.scraper.scrape_credit_card(bank)
-            else:
-                competitor_data = st.session_state.scraper.scrape_deposit(bank)
+            # Get Sber reference data from local files
+            sber_data = st.session_state.scraper.get_product_data("Сбер", product_type)
+
+            # Select the correct normalization function based on product type
+            normalizer_func = {
+                "credit_card": st.session_state.normalizer.normalize_credit_card,
+                "deposit": st.session_state.normalizer.normalize_deposit,
+                "consumer_loan": st.session_state.normalizer.normalize_consumer_loan,
+            }.get(product_type)
             
-            # Get Sber reference data
-            sber_key = list(st.session_state.sber_products.keys())[0]
-            sber_data = st.session_state.sber_products[sber_key]
-            
-            # Normalize data
-            competitor_normalized = st.session_state.normalizer.normalize_credit_card(
-                competitor_data, bank
-            )
-            sber_normalized = st.session_state.normalizer.normalize_credit_card(
-                sber_data, "Сбер"
-            )
+            if not normalizer_func:
+                st.error(f"Неподдерживаемый тип продукта: {product_type}")
+                st.stop()
+
+            # Check if data was loaded successfully
+            if not competitor_data.get('карты') or not sber_data.get('карты'):
+                st.error("Не удалось загрузить данные для сравнения. Проверьте файлы данных.")
+                st.stop()
+
+            # Normalize data - using the first card for simplicity
+            competitor_normalized = normalizer_func(competitor_data['карты'][0], bank)
+            sber_normalized = normalizer_func(sber_data['карты'][0], "Сбер")
             
             # Compare
             comparison = st.session_state.comparator.compare_products(

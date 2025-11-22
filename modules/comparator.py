@@ -3,7 +3,7 @@ modules/comparator.py - Comparison and insights generation
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -69,26 +69,46 @@ class ProductComparator:
         
         return insights
     
+    def _extract_rate(self, rate_str: str) -> Optional[float]:
+        """Extract numeric rate from string, handles ranges."""
+        if not rate_str or rate_str == "Н/Д":
+            return None
+        try:
+            # If it's a range like "17.9% - 25.9%", take the first number
+            if '-' in str(rate_str):
+                rate_str = str(rate_str).split('-')[0]
+            
+            return float(str(rate_str).replace('%', '').replace('₽', '').strip())
+        except (ValueError, TypeError):
+            logger.warning(f"Could not extract rate from '{rate_str}'")
+            return None
+
     def _find_advantages(self, first: Dict, second: Dict, product_type: str) -> List[str]:
         """Find competitive advantages of first vs second"""
         advantages = []
         
-        # Common advantages check
-        for key, value in first.items():
-            second_value = second.get(key)
-            if value != second_value and value != "Н/Д":
-                if key in ["interest_rate", "commission", "annual_fee"]:
-                    # Lower is better
-                    if isinstance(value, str) and isinstance(second_value, str):
-                        try:
-                            if float(value.replace('%', '').replace('₽', '')) < \
-                               float(second_value.replace('%', '').replace('₽', '')):
-                                advantages.append(f"• {key}: {value}")
-                        except:
-                            pass
-        
-        return advantages if advantages else ["Данные не полны для детального анализа"]
-    
+        # Interest rate comparison (lower is better for credit, higher for deposit)
+        rate1 = self._extract_rate(first.get("interest_rate"))
+        rate2 = self._extract_rate(second.get("interest_rate"))
+        if rate1 is not None and rate2 is not None:
+            if product_type == "credit_card" and rate1 < rate2:
+                advantages.append(f"• Более низкая процентная ставка: {first.get('interest_rate')}")
+            if product_type == "deposit" and rate1 > rate2:
+                advantages.append(f"• Более высокая процентная ставка: {first.get('interest_rate')}")
+
+        # Annual fee comparison (lower is better)
+        fee1_str = str(first.get("annual_fee", "Н/Д")).replace('₽', '')
+        fee2_str = str(second.get("annual_fee", "Н/Д")).replace('₽', '')
+        try:
+            fee1 = float(fee1_str)
+            fee2 = float(fee2_str)
+            if fee1 < fee2:
+                advantages.append(f"• Более низкая стоимость обслуживания: {first.get('annual_fee')}")
+        except (ValueError, TypeError):
+            pass # Cannot compare fees if they are not numeric
+
+        return advantages if advantages else ["Преимущества не найдены"]
+
     def _get_recommendation(self, sber_advantages: List[str], 
                            competitor_advantages: List[str]) -> str:
         """Generate recommendation based on advantages"""
@@ -98,12 +118,3 @@ class ProductComparator:
             return "Конкурент имеет лучшие условия - рекомендуется пересмотреть"
         else:
             return "Условия примерно сопоставимы"
-    
-    def _extract_rate(self, rate_str: str) -> float:
-        """Extract numeric rate from string"""
-        if not rate_str or rate_str == "Н/Д":
-            return None
-        try:
-            return float(str(rate_str).replace('%', '').replace('₽', '').strip())
-        except:
-            return None
