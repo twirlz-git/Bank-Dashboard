@@ -2,6 +2,7 @@
 app/main.py - Main Streamlit application entry point
 """
 
+import os
 import streamlit as st
 import sys
 from pathlib import Path
@@ -13,6 +14,7 @@ from modules.llm_router import LLMRouter
 from modules.scraper import BankDataReader
 from modules.normalizer import DataNormalizer
 from modules.comparator import ProductComparator
+from modules.llm_comparator import LLMComparator  # NEW
 from modules.trends_analyzer import TrendsAnalyzer
 from modules.report_generator import ReportGenerator
 from modules.utils import load_json_config
@@ -20,7 +22,7 @@ from modules.utils import load_json_config
 # Configure page
 st.set_page_config(
     page_title="Banking Analyzer MVP",
-    page_icon="🏦",
+    page_icon="🏬",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -30,17 +32,27 @@ if 'router' not in st.session_state:
     st.session_state.router = LLMRouter()
     st.session_state.scraper = BankDataReader()
     st.session_state.normalizer = DataNormalizer()
-    st.session_state.comparator = ProductComparator()
+    st.session_state.comparator = ProductComparator()  # Legacy comparator
+    st.session_state.llm_comparator = LLMComparator()  # NEW: LLM-powered comparator
     st.session_state.trends_analyzer = TrendsAnalyzer()
     st.session_state.report_gen = ReportGenerator()
     st.session_state.sber_products = load_json_config("configs/sber_products.json")
 
 # Title
-st.title("🏦 Banking Product Analyzer MVP")
+st.title("🏬 Banking Product Analyzer MVP")
 st.markdown("*Анализ конкурентных банковских продуктов с помощью AI*")
 
 # Sidebar
 st.sidebar.markdown("## ⚙️ Настройки")
+
+# LLM Status indicator
+if st.session_state.llm_comparator.is_enabled():
+    st.sidebar.success("✅ LLM-сравнение активно")
+    st.sidebar.caption(f"🤖 Модель: {st.session_state.llm_comparator.model}")
+else:
+    st.sidebar.warning("⚠️ LLM недоступен")
+    st.sidebar.caption("🔑 Добавьте OPENAI_API_KEY")
+
 mode = st.sidebar.radio(
     "Выберите режим анализа",
     ["📊 Срочный отчет (Urgent)", "📈 Анализ трендов (Trends)"]
@@ -62,9 +74,10 @@ if "Urgent" in mode:
     with col2:
         product_type = st.selectbox(
             "Тип продукта",
-            ["credit_card", "deposit", "consumer_loan"],
+            ["credit_card", "debit_card", "deposit", "consumer_loan"],
             format_func=lambda x: {
                 "credit_card": "Кредитная карта",
+                "debit_card": "Дебетовая карта",
                 "deposit": "Вклад",
                 "consumer_loan": "Потребительский кредит"
             }[x]
@@ -76,41 +89,64 @@ if "Urgent" in mode:
         analyze_btn = st.button("🔍 Анализировать", use_container_width=True)
     
     if analyze_btn:
-        with st.spinner("Собираю данные..."):
-            # Get competitor data from local files
+        with st.spinner("Собираю данные..."): # Get competitor data from local files
             competitor_data = st.session_state.scraper.get_product_data(bank, product_type)
             
             # Get Sber reference data from local files
             sber_data = st.session_state.scraper.get_product_data("Сбер", product_type)
-
-            # Select the correct normalization function based on product type
-            normalizer_func = {
-                "credit_card": st.session_state.normalizer.normalize_credit_card,
-                "deposit": st.session_state.normalizer.normalize_deposit,
-                "consumer_loan": st.session_state.normalizer.normalize_consumer_loan,
-            }.get(product_type)
-            
-            if not normalizer_func:
-                st.error(f"Неподдерживаемый тип продукта: {product_type}")
-                st.stop()
 
             # Check if data was loaded successfully
             if not competitor_data.get('карты') or not sber_data.get('карты'):
                 st.error("Не удалось загрузить данные для сравнения. Проверьте файлы данных.")
                 st.stop()
 
-            # Normalize data - using the first card for simplicity
-            competitor_normalized = normalizer_func(competitor_data['карты'][0], bank)
-            sber_normalized = normalizer_func(sber_data['карты'][0], "Сбер")
+            # Extract first card from each dataset (raw data)
+            competitor_card = competitor_data['карты'][0]
+            sber_card = sber_data['карты'][0]
             
-            # Compare
-            comparison = st.session_state.comparator.compare_products(
-                sber_normalized, competitor_normalized, product_type
-            )
+            # NEW: Try LLM-powered comparison first
+            use_llm = st.session_state.llm_comparator.is_enabled()
+            
+            if use_llm:
+                with st.spinner("🤖 LLM анализирует данные..."):
+                    comparison = st.session_state.llm_comparator.compare_products(
+                        sber_card,
+                        competitor_card,
+                        product_type,
+                        bank
+                    )
+            else:
+                # Fallback to legacy normalized comparison
+                with st.spinner("Анализирую данные..."): # Select the correct normalization function based on product type
+                    normalizer_func = {
+                        "credit_card": st.session_state.normalizer.normalize_credit_card,
+                        "debit_card": st.session_state.normalizer.normalize_deposit,  # Reuse deposit
+                        "deposit": st.session_state.normalizer.normalize_deposit,
+                        "consumer_loan": st.session_state.normalizer.normalize_consumer_loan,
+                    }.get(product_type)
+                    
+                    if not normalizer_func:
+                        st.error(f"Неподдерживаемый тип продукта: {product_type}")
+                        st.stop()
+
+                    # Normalize data - using the first card for simplicity
+                    competitor_normalized = normalizer_func(competitor_card, bank)
+                    sber_normalized = normalizer_func(sber_card, "Сбер")
+                    
+                    # Compare
+                    comparison = st.session_state.comparator.compare_products(
+                        sber_normalized, competitor_normalized, product_type
+                    )
             
             # Display results
             st.markdown("---")
             st.markdown("## Результаты анализа")
+            
+            # Show if LLM was used
+            if comparison.get("llm_powered", False):
+                st.success("🤖 Сравнение сгенерировано с помощью LLM")
+            else:
+                st.info("📄 Базовое сравнение")
             
             st.markdown("### 📋 Сравнительная таблица")
             st.dataframe(comparison["comparison_table"], use_container_width=True)
@@ -119,13 +155,17 @@ if "Urgent" in mode:
             for insight in comparison["insights"]:
                 st.write(insight)
             
-            st.markdown("### ✅ Преимущества Сбера")
-            for adv in comparison["sber_advantages"]:
-                st.write(adv)
+            col_adv1, col_adv2 = st.columns(2)
             
-            st.markdown("### ⚡ Преимущества конкурента")
-            for adv in comparison["competitor_advantages"]:
-                st.write(adv)
+            with col_adv1:
+                st.markdown("### ✅ Преимущества Сбера")
+                for adv in comparison["sber_advantages"]:
+                    st.write(adv)
+            
+            with col_adv2:
+                st.markdown(f"### ⚡ Преимущества {bank}")
+                for adv in comparison["competitor_advantages"]:
+                    st.write(adv)
             
             st.markdown("### 🎯 Рекомендация")
             st.info(comparison["recommendation"])
