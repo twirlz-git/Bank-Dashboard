@@ -31,6 +31,36 @@ DATA_SOURCES = {
                 "annual_fee": ".fee-value"
             },
             "timeout": 15
+        },
+        "lokobank": {
+            "url": "https://loko-bank.ru/cards/credit/",
+            "selectors": {
+                "rate": ".credit-rate",
+                "grace_period": ".grace-period",
+                "cashback": ".cashback-value",
+                "annual_fee": ".annual-fee"
+            },
+            "timeout": 15
+        },
+        "mtsbank": {
+            "url": "https://www.mtsbank.ru/chastnim-licam/karty/kreditnye/",
+            "selectors": {
+                "rate": ".interest-rate",
+                "grace_period": ".grace-period-info",
+                "cashback": ".cashback-percent",
+                "annual_fee": ".service-fee"
+            },
+            "timeout": 15
+        },
+        "raiffeisenbank": {
+            "url": "https://www.raiffeisen.ru/retail/cards/credit/",
+            "selectors": {
+                "rate": ".rate-value",
+                "grace_period": ".grace-days",
+                "cashback": ".cashback-info",
+                "annual_fee": ".fee-amount"
+            },
+            "timeout": 15
         }
     },
     "deposit": {
@@ -40,6 +70,42 @@ DATA_SOURCES = {
                 "rate": ".deposit-rate-value",
                 "min_amount": ".min-deposit-amount",
                 "term": ".term-months"
+            },
+            "timeout": 15
+        },
+        "gazprombank": {
+            "url": "https://www.gazprombank.ru/retail/deposits/",
+            "selectors": {
+                "rate": ".deposit-rate",
+                "min_amount": ".min-amount",
+                "term": ".deposit-term"
+            },
+            "timeout": 15
+        },
+        "lokobank": {
+            "url": "https://loko-bank.ru/deposits/",
+            "selectors": {
+                "rate": ".rate-value",
+                "min_amount": ".min-deposit",
+                "term": ".term-value"
+            },
+            "timeout": 15
+        },
+        "mtsbank": {
+            "url": "https://www.mtsbank.ru/chastnim-licam/vklady/",
+            "selectors": {
+                "rate": ".deposit-rate-value",
+                "min_amount": ".minimum-amount",
+                "term": ".deposit-period"
+            },
+            "timeout": 15
+        },
+        "raiffeisenbank": {
+            "url": "https://www.raiffeisen.ru/retail/deposits/",
+            "selectors": {
+                "rate": ".rate-percent",
+                "min_amount": ".min-sum",
+                "term": ".deposit-term"
             },
             "timeout": 15
         }
