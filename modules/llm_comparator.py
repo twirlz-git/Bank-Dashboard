@@ -10,6 +10,13 @@ import json
 import logging
 from typing import Dict, Any, List, Optional
 import pandas as pd
+from pathlib import Path
+
+from dotenv import load_dotenv, find_dotenv
+
+project_root = Path(__file__).parent.absolute()
+env_path = project_root / '.env'
+load_dotenv(dotenv_path=env_path, override=True)
 
 logger = logging.getLogger(__name__)
 
@@ -26,13 +33,13 @@ class LLMComparator:
             base_url: API base URL (defaults to OpenRouter if not specified)
         """
         # Prioritize OpenRouter key, fall back to OpenAI key
-        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
+        self.api_key = "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"
 
         # Default to OpenRouter if no base_url is provided
-        self.base_url = base_url or os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+        self.base_url = "https://openrouter.ai/api/v1"
 
         # Set a default OpenRouter model (e.g., Gemini Flash is fast/cheap for comparisons)
-        self.model = os.getenv("OPENAI_MODEL", "google/gemini-2.0-flash-001")
+        self.model = "tngtech/deepseek-r1t2-chimera:free"
 
         if not self.api_key:
             logger.warning("No API key found. LLM comparison will be disabled.")
@@ -43,13 +50,13 @@ class LLMComparator:
                 from openai import OpenAI
                 self.client = OpenAI(
                     api_key=self.api_key,
-                    base_url=self.base_url,
-                    # OpenRouter recommends these headers to identify your app
-                    default_headers={
-                        "HTTP-Referer": "https://github.com/your-repo/banking-comparator",
-                        "X-Title": "Banking Product Comparator"
-                    }
+                    base_url=self.base_url
                 )
+                if "openrouter" in self.base_url.lower():
+                    self.client.default_headers.update({
+                        "HTTP-Referer": "https://github.com/twirlz-git/Bank-Dashboard",
+                        "X-Title": "Banking Product Comparator"
+                    })
             except ImportError:
                 logger.error("openai package not installed. Run: pip install openai")
                 self.enabled = False
