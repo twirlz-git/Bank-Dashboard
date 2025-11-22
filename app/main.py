@@ -14,7 +14,8 @@ from modules.llm_router import LLMRouter
 from modules.scraper import BankDataReader
 from modules.normalizer import DataNormalizer
 from modules.comparator import ProductComparator
-from modules.llm_comparator import LLMComparator  # NEW
+from modules.llm_comparator import LLMComparator
+from modules.multi_bank_comparator import MultiBankComparator  # NEW
 from modules.trends_analyzer import TrendsAnalyzer
 from modules.report_generator import ReportGenerator
 from modules.utils import load_json_config
@@ -32,8 +33,9 @@ if 'router' not in st.session_state:
     st.session_state.router = LLMRouter()
     st.session_state.scraper = BankDataReader()
     st.session_state.normalizer = DataNormalizer()
-    st.session_state.comparator = ProductComparator()  # Legacy comparator
-    st.session_state.llm_comparator = LLMComparator()  # NEW: LLM-powered comparator
+    st.session_state.comparator = ProductComparator()
+    st.session_state.llm_comparator = LLMComparator()
+    st.session_state.multi_comparator = MultiBankComparator(st.session_state.llm_comparator)  # NEW
     st.session_state.trends_analyzer = TrendsAnalyzer()
     st.session_state.report_gen = ReportGenerator()
     st.session_state.sber_products = load_json_config("configs/sber_products.json")
@@ -55,7 +57,7 @@ else:
 
 mode = st.sidebar.radio(
     "Выберите режим анализа",
-    ["📊 Срочный отчет (Urgent)", "📈 Анализ трендов (Trends)"]
+    ["📊 Срочный отчет (Urgent)", "🔄 Мульти-банк сравнение", "📈 Анализ трендов (Trends)"]
 )
 
 # Main content
@@ -179,6 +181,125 @@ if "Urgent" in mode:
                 file_name=st.session_state.report_gen.get_filename("urgent", bank),
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
+elif "Мульти-банк" in mode:
+    st.markdown("### Мульти-банк сравнение - Сбер vs. Конкуренты")
+    st.markdown("Сравните продукт Сбербанка с несколькими конкурентами одновременно")
+    
+    # Product type selection
+    product_type = st.selectbox(
+        "Тип продукта",
+        ["credit_card", "debit_card", "deposit", "consumer_loan"],
+        format_func=lambda x: {
+            "credit_card": "Кредитная карта",
+            "debit_card": "Дебетовая карта",
+            "deposit": "Вклад",
+            "consumer_loan": "Потребительский кредит"
+        }[x],
+        key="multi_product_type"
+    )
+    
+    # Multi-select for banks
+    st.markdown("#### Выберите банки для сравнения")
+    available_banks = ["ВТБ", "Альфа", "Тинькофф", "Газпромбанк", "Локобанк", "МТС Банк", "Райффайзенбанк"]
+    
+    selected_banks = st.multiselect(
+        "Конкуренты (можно выбрать несколько)",
+        available_banks,
+        default=["ВТБ", "Альфа"],
+        help="Выберите от 1 до 7 банков для сравнения с Сбербанком"
+    )
+    
+    # Analyze button
+    analyze_btn = st.button("🔍 Сравнить с конкурентами", use_container_width=True)
+    
+    if analyze_btn:
+        if not selected_banks:
+            st.warning("⚠️ Пожалуйста, выберите хотя бы один банк для сравнения")
+            st.stop()
+        
+        with st.spinner("Собираю данные по всем банкам..."):
+            # Get Sber reference data
+            sber_data = st.session_state.scraper.get_product_data("Сбер", product_type)
+            
+            if not sber_data.get('карты'):
+                st.error("Не удалось загрузить данные Сбербанка")
+                st.stop()
+            
+            sber_card = sber_data['карты'][0]
+            
+            # Get competitor data for all selected banks
+            competitor_data_list = []
+            valid_banks = []
+            
+            for bank in selected_banks:
+                bank_data = st.session_state.scraper.get_product_data(bank, product_type)
+                if bank_data.get('карты'):
+                    competitor_data_list.append(bank_data['карты'][0])
+                    valid_banks.append(bank)
+                else:
+                    st.warning(f"⚠️ Данные для {bank} недоступны - пропускаем")
+            
+            if not competitor_data_list:
+                st.error("Не удалось загрузить данные ни одного конкурента")
+                st.stop()
+            
+            # Perform multi-bank comparison
+            with st.spinner("🤖 LLM анализирует все банки..."):
+                comparison = st.session_state.multi_comparator.compare_multiple_banks(
+                    sber_card,
+                    competitor_data_list,
+                    valid_banks,
+                    product_type
+                )
+            
+            # Display results
+            st.markdown("---")
+            st.markdown("## Результаты мульти-банк сравнения")
+            
+            # Show if LLM was used
+            if comparison.get("llm_powered", False):
+                st.success(f"🤖 Сравнение {len(valid_banks)} банков сгенерировано с помощью LLM")
+            else:
+                st.info("📄 Базовое сравнение")
+            
+            # Display comparison table
+            st.markdown("### 📊 Сравнительная таблица")
+            st.markdown("*Сбербанк в первой колонке, конкуренты - справа*")
+            st.dataframe(comparison["comparison_table"], use_container_width=True)
+            
+            # Display insights
+            st.markdown("### 💡 Ключевые выводы")
+            for insight in comparison["insights"]:
+                st.markdown(insight)
+            
+            # Display Sber advantages
+            st.markdown("### ✅ Преимущества Сбербанка")
+            for adv in comparison["sber_advantages"]:
+                st.markdown(adv)
+            
+            # Display competitor highlights
+            st.markdown("### ⚡ Сильные стороны конкурентов")
+            
+            competitor_highlights = comparison.get("competitor_highlights", {})
+            if competitor_highlights:
+                # Create columns for each competitor
+                cols = st.columns(len(valid_banks))
+                for i, bank in enumerate(valid_banks):
+                    with cols[i]:
+                        st.markdown(f"**{bank}**")
+                        highlights = competitor_highlights.get(bank, [])
+                        for highlight in highlights:
+                            st.markdown(highlight)
+            
+            # Display recommendation
+            st.markdown("### 🎯 Общая рекомендация")
+            st.info(comparison["recommendation"])
+            
+            # Export button
+            st.markdown("---")
+            st.markdown("### 📥 Экспорт результатов")
+            st.info("Функция экспорта мульти-банк сравнений будет добавлена позже")
 
 else:  # Trends mode
     st.markdown("### Анализ трендов - Динамика продуктов")
