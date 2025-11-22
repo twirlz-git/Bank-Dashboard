@@ -9,7 +9,6 @@ from plotly.subplots import make_subplots
 from datetime import datetime
 import io
 import base64
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +24,10 @@ class ChartGenerator:
             'warning': '#ffc107',
             'danger': '#dc3545',
             'info': '#17a2b8',
-            'gradient_start': '#667eea',
-            'gradient_end': '#764ba2'
+            'gradient_colors': [
+                '#FF6B6B', '#FFA07A', '#FFD93D', '#6BCF7F', 
+                '#4ECDC4', '#45B7D1', '#5E60CE', '#9B5DE5'
+            ]
         }
 
     def generate_timeline_chart(self, timeline: List[Dict[str, Any]], title: str = "Динамика изменения ставки") -> go.Figure:
@@ -52,14 +53,18 @@ class ChartGenerator:
         # Create figure
         fig = go.Figure()
         
-        # Add line trace
+        # Add line trace with gradient effect
         fig.add_trace(go.Scatter(
             x=dates,
             y=rates,
             mode='lines+markers',
             name='Ставка',
-            line=dict(color=self.colors['primary'], width=3),
-            marker=dict(size=10, color=self.colors['secondary']),
+            line=dict(color=self.colors['primary'], width=3, shape='spline'),
+            marker=dict(
+                size=12, 
+                color=self.colors['secondary'],
+                line=dict(width=2, color='white')
+            ),
             hovertemplate='<b>Дата:</b> %{x}<br><b>Ставка:</b> %{y:.2f}%<br><b>Причина:</b> %{text}<extra></extra>',
             text=reasons
         ))
@@ -70,7 +75,7 @@ class ChartGenerator:
                 'text': title,
                 'x': 0.5,
                 'xanchor': 'center',
-                'font': {'size': 18, 'family': 'Arial, sans-serif'}
+                'font': {'size': 18, 'family': 'Arial, sans-serif', 'color': '#2C3E50'}
             },
             xaxis_title='Дата',
             yaxis_title='Процентная ставка (%)',
@@ -79,19 +84,20 @@ class ChartGenerator:
             showlegend=False,
             height=500,
             font={'family': 'Arial, sans-serif'},
-            margin=dict(l=60, r=40, t=80, b=60)
+            margin=dict(l=60, r=40, t=80, b=60),
+            plot_bgcolor='rgba(240, 240, 240, 0.3)'
         )
         
         # Add grid
-        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
-        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
+        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(200, 200, 200, 0.3)')
+        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(200, 200, 200, 0.3)')
         
         return fig
 
     def generate_comparison_chart(self, comparison_data: Dict[str, Any]) -> go.Figure:
         """
-        Generate radar/spider chart comparing two products.
-        Replaced bar chart with more visually appealing radar chart.
+        Generate styled grouped bar chart comparing products.
+        Works well with small number of data points.
         
         Args:
             comparison_data: Dictionary with comparison data
@@ -110,7 +116,7 @@ class ChartGenerator:
         # Get bank names from column headers (skip first column)
         banks = comparison_table.columns[1:].tolist()
         
-        # Extract numeric parameters for radar chart
+        # Create grouped bar chart for numeric parameters only
         numeric_params = []
         bank_values = {bank: [] for bank in banks}
         
@@ -140,76 +146,69 @@ class ChartGenerator:
         if not numeric_params:
             return self._create_empty_chart("Нет числовых параметров для визуализации")
         
-        # Normalize values to 0-100 scale for better radar chart display
-        normalized_values = {bank: [] for bank in banks}
-        for param_idx in range(len(numeric_params)):
-            param_values = [bank_values[bank][param_idx] for bank in banks]
-            max_val = max(param_values) if max(param_values) > 0 else 1
-            
-            for bank in banks:
-                normalized_values[bank].append((bank_values[bank][param_idx] / max_val) * 100)
-        
-        # Create radar chart
+        # Create figure with styled bars
         fig = go.Figure()
         
-        colors = [
-            self.colors['primary'], 
-            self.colors['secondary'], 
-            self.colors['info'],
-            self.colors['success']
-        ]
+        # Use gradient colors for different banks
+        colors = self.colors['gradient_colors']
         
         for idx, bank in enumerate(banks):
-            fig.add_trace(go.Scatterpolar(
-                r=normalized_values[bank] + [normalized_values[bank][0]],  # Close the loop
-                theta=numeric_params + [numeric_params[0]],
-                fill='toself',
-                fillcolor=colors[idx % len(colors)],
-                opacity=0.6,
+            # Create gradient effect for each bar
+            bar_color = colors[idx % len(colors)]
+            
+            fig.add_trace(go.Bar(
                 name=bank,
-                line=dict(color=colors[idx % len(colors)], width=2),
-                marker=dict(size=8, color=colors[idx % len(colors)])
+                x=numeric_params,
+                y=bank_values[bank],
+                marker=dict(
+                    color=bar_color,
+                    line=dict(color='rgba(255, 255, 255, 0.8)', width=1.5),
+                    pattern=dict(shape="")  # Solid fill
+                ),
+                text=[f"{v:.1f}" for v in bank_values[bank]],
+                textposition='outside',
+                textfont=dict(size=11, color='#2C3E50', family='Arial'),
+                hovertemplate='<b>%{fullData.name}</b><br>%{x}: %{y:.2f}<extra></extra>'
             ))
         
         fig.update_layout(
-            polar=dict(
-                radialaxis=dict(
-                    visible=True,
-                    range=[0, 100],
-                    showticklabels=False,
-                    ticks='',
-                    gridcolor='lightgray'
-                ),
-                angularaxis=dict(
-                    gridcolor='lightgray'
-                )
-            ),
             title={
                 'text': 'Сравнение ключевых параметров',
                 'x': 0.5,
                 'xanchor': 'center',
-                'font': {'size': 18, 'family': 'Arial, sans-serif'}
+                'font': {'size': 18, 'family': 'Arial, sans-serif', 'color': '#2C3E50'}
             },
-            showlegend=True,
+            xaxis_title='Параметр',
+            yaxis_title='Значение',
+            barmode='group',
+            bargap=0.15,  # Gap between bars of adjacent location coordinates
+            bargroupgap=0.1,  # Gap between bars of the same location coordinate
+            template='plotly_white',
+            height=500,
+            font={'family': 'Arial, sans-serif'},
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
                 y=1.02,
                 xanchor="right",
-                x=1
+                x=1,
+                bgcolor='rgba(255, 255, 255, 0.8)',
+                bordercolor='rgba(200, 200, 200, 0.5)',
+                borderwidth=1
             ),
-            template='plotly_white',
-            height=600,
-            font={'family': 'Arial, sans-serif'},
-            margin=dict(l=80, r=80, t=100, b=80)
+            margin=dict(l=60, r=40, t=100, b=80),
+            plot_bgcolor='rgba(240, 240, 240, 0.3)'
         )
+        
+        fig.update_xaxes(showgrid=False)
+        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(200, 200, 200, 0.3)')
         
         return fig
 
     def generate_trend_analysis_chart(self, timeline: List[Dict[str, Any]], analysis: Dict[str, Any]) -> go.Figure:
         """
-        Generate comprehensive trend analysis chart with annotations.
-        Replaced bar chart with area chart for smoother visualization.
+        Generate comprehensive trend analysis chart with histogram.
+        Styled like the diamond dataset visualization.
         
         Args:
             timeline: Timeline data
@@ -229,20 +228,24 @@ class ChartGenerator:
         # Create figure with subplots
         fig = make_subplots(
             rows=2, cols=1,
-            row_heights=[0.7, 0.3],
-            subplot_titles=("Динамика процентной ставки", "Градиент изменений"),
-            vertical_spacing=0.15
+            row_heights=[0.65, 0.35],
+            subplot_titles=("Динамика процентной ставки", "Распределение изменений"),
+            vertical_spacing=0.12
         )
         
-        # Main trend line
+        # Main trend line with spline interpolation
         fig.add_trace(
             go.Scatter(
                 x=dates,
                 y=rates,
                 mode='lines+markers',
                 name='Ставка',
-                line=dict(color=self.colors['primary'], width=3),
-                marker=dict(size=10, color=self.colors['secondary']),
+                line=dict(color=self.colors['primary'], width=3, shape='spline'),
+                marker=dict(
+                    size=12, 
+                    color=self.colors['secondary'],
+                    line=dict(width=2, color='white')
+                ),
                 showlegend=False
             ),
             row=1, col=1
@@ -263,51 +266,37 @@ class ChartGenerator:
                 row=1, col=1
             )
         
-        # Add smooth area chart for changes (instead of bar chart)
+        # Add histogram with gradient colors (like the diamond visualization)
         if len(rates) > 1:
             changes = [rates[i] - rates[i-1] for i in range(1, len(rates))]
             
-            # Create color gradient based on change direction
-            colors_area = []
+            # Create gradient colors based on value
+            colors_hist = []
             for c in changes:
-                if c < 0:
-                    colors_area.append(self.colors['success'])  # Green for decrease
+                if c < -0.5:
+                    colors_hist.append('#28a745')  # Strong green for big decrease
+                elif c < 0:
+                    colors_hist.append('#6BCF7F')  # Light green for small decrease
+                elif c < 0.5:
+                    colors_hist.append('#FFA07A')  # Light red for small increase
                 else:
-                    colors_area.append(self.colors['danger'])  # Red for increase
+                    colors_hist.append('#dc3545')  # Strong red for big increase
             
-            # Area chart with gradient fill
             fig.add_trace(
-                go.Scatter(
+                go.Bar(
                     x=dates[1:],
                     y=changes,
-                    mode='lines',
                     name='Изменение',
-                    line=dict(color=self.colors['info'], width=2),
-                    fill='tozeroy',
-                    fillcolor='rgba(23, 162, 184, 0.3)',
+                    marker=dict(
+                        color=colors_hist,
+                        line=dict(color='rgba(255, 255, 255, 0.6)', width=1),
+                        opacity=0.8
+                    ),
+                    hovertemplate='<b>Дата:</b> %{x}<br><b>Изменение:</b> %{y:.2f}%<extra></extra>',
                     showlegend=False
                 ),
                 row=2, col=1
             )
-            
-            # Add markers for significant changes
-            significant_changes = [(i, c) for i, c in enumerate(changes) if abs(c) > 0.5]
-            if significant_changes:
-                sig_dates = [dates[1:][i] for i, _ in significant_changes]
-                sig_values = [c for _, c in significant_changes]
-                sig_colors = [self.colors['success'] if c < 0 else self.colors['danger'] for c in sig_values]
-                
-                fig.add_trace(
-                    go.Scatter(
-                        x=sig_dates,
-                        y=sig_values,
-                        mode='markers',
-                        marker=dict(size=12, color=sig_colors, symbol='diamond', line=dict(width=2, color='white')),
-                        name='Значительные изменения',
-                        showlegend=False
-                    ),
-                    row=2, col=1
-                )
         
         # Update layout
         fig.update_layout(
@@ -315,7 +304,7 @@ class ChartGenerator:
                 'text': 'Детальный анализ трендов',
                 'x': 0.5,
                 'xanchor': 'center',
-                'font': {'size': 20, 'family': 'Arial, sans-serif'}
+                'font': {'size': 20, 'family': 'Arial, sans-serif', 'color': '#2C3E50'}
             },
             template='plotly_white',
             height=700,
@@ -325,23 +314,27 @@ class ChartGenerator:
                 yanchor="bottom",
                 y=1.02,
                 xanchor="right",
-                x=1
+                x=1,
+                bgcolor='rgba(255, 255, 255, 0.8)',
+                bordercolor='rgba(200, 200, 200, 0.5)',
+                borderwidth=1
             ),
-            margin=dict(l=60, r=40, t=120, b=60)
+            margin=dict(l=60, r=40, t=120, b=60),
+            plot_bgcolor='rgba(240, 240, 240, 0.3)'
         )
         
         # Update axes
-        fig.update_xaxes(title_text="Дата", row=1, col=1, showgrid=True, gridcolor='lightgray')
-        fig.update_yaxes(title_text="Ставка (%)", row=1, col=1, showgrid=True, gridcolor='lightgray')
-        fig.update_xaxes(title_text="Дата", row=2, col=1, showgrid=True, gridcolor='lightgray')
+        fig.update_xaxes(title_text="Дата", row=1, col=1, showgrid=True, gridcolor='rgba(200, 200, 200, 0.3)')
+        fig.update_yaxes(title_text="Ставка (%)", row=1, col=1, showgrid=True, gridcolor='rgba(200, 200, 200, 0.3)')
+        fig.update_xaxes(title_text="Дата", row=2, col=1, showgrid=False)
         fig.update_yaxes(
             title_text="Изменение (%)", 
             row=2, col=1, 
             showgrid=True, 
-            gridcolor='lightgray',
+            gridcolor='rgba(200, 200, 200, 0.3)',
             zeroline=True,
             zerolinewidth=2,
-            zerolinecolor='gray'
+            zerolinecolor='rgba(100, 100, 100, 0.5)'
         )
         
         return fig
@@ -362,8 +355,7 @@ class ChartGenerator:
         
         fig = go.Figure()
         
-        colors = [self.colors['primary'], self.colors['secondary'], 
-                  self.colors['info'], self.colors['success'], self.colors['warning']]
+        colors = self.colors['gradient_colors']
         
         for idx, bank_data in enumerate(banks_data):
             bank_name = bank_data.get('bank', f'Банк {idx + 1}')
@@ -378,8 +370,12 @@ class ChartGenerator:
                     y=rates,
                     mode='lines+markers',
                     name=bank_name,
-                    line=dict(color=colors[idx % len(colors)], width=2),
-                    marker=dict(size=8)
+                    line=dict(color=colors[idx % len(colors)], width=3, shape='spline'),
+                    marker=dict(
+                        size=10,
+                        color=colors[idx % len(colors)],
+                        line=dict(width=2, color='white')
+                    )
                 ))
         
         fig.update_layout(
@@ -387,7 +383,7 @@ class ChartGenerator:
                 'text': 'Сравнение трендов нескольких банков',
                 'x': 0.5,
                 'xanchor': 'center',
-                'font': {'size': 18, 'family': 'Arial, sans-serif'}
+                'font': {'size': 18, 'family': 'Arial, sans-serif', 'color': '#2C3E50'}
             },
             xaxis_title='Дата',
             yaxis_title='Процентная ставка (%)',
@@ -400,13 +396,17 @@ class ChartGenerator:
                 yanchor="top",
                 y=1,
                 xanchor="left",
-                x=1.02
+                x=1.02,
+                bgcolor='rgba(255, 255, 255, 0.8)',
+                bordercolor='rgba(200, 200, 200, 0.5)',
+                borderwidth=1
             ),
-            margin=dict(l=60, r=150, t=80, b=60)
+            margin=dict(l=60, r=150, t=80, b=60),
+            plot_bgcolor='rgba(240, 240, 240, 0.3)'
         )
         
-        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
-        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
+        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(200, 200, 200, 0.3)')
+        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(200, 200, 200, 0.3)')
         
         return fig
 
