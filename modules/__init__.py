@@ -9,6 +9,7 @@ from .comparator import ProductComparator
 from .trends_analyzer import TrendsAnalyzer
 from .report_generator import ReportGenerator
 from .chart_generator import ChartGenerator
+from .historical_generator import HistoricalDataGenerator
 from .utils import load_json_config, save_json_cache
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     'TrendsAnalyzer',
     'ReportGenerator',
     'ChartGenerator',
+    'HistoricalDataGenerator',
     'load_json_config',
     'save_json_cache'
 ]
