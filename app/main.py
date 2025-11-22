@@ -17,6 +17,7 @@ from modules.comparator import ProductComparator
 from modules.llm_comparator import LLMComparator  # NEW
 from modules.trends_analyzer import TrendsAnalyzer
 from modules.report_generator import ReportGenerator
+from modules.chart_generator import ChartGenerator
 from modules.utils import load_json_config
 
 # Configure page
@@ -36,6 +37,7 @@ if 'router' not in st.session_state:
     st.session_state.llm_comparator = LLMComparator()  # NEW: LLM-powered comparator
     st.session_state.trends_analyzer = TrendsAnalyzer()
     st.session_state.report_gen = ReportGenerator()
+    st.session_state.chart_gen = ChartGenerator()
     st.session_state.sber_products = load_json_config("configs/sber_products.json")
 
 # Title
@@ -151,6 +153,14 @@ if "Urgent" in mode:
             st.markdown("### 📋 Сравнительная таблица")
             st.dataframe(comparison["comparison_table"], use_container_width=True)
             
+            # Add comparison chart
+            st.markdown("### 📈 Визуализация сравнения")
+            try:
+                fig = st.session_state.chart_gen.generate_comparison_chart(comparison)
+                st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.warning(f"Не удалось построить график: {e}")
+            
             st.markdown("### 💡 Ключевые выводы")
             for insight in comparison["insights"]:
                 st.write(insight)
@@ -226,13 +236,75 @@ else:  # Trends mode
             st.markdown("---")
             st.markdown("## Результаты анализа трендов")
             
+            # Display data source badge
+            if trends.get("data_source") == "mock":
+                st.warning("⚠️ Используются мок-данные для демонстрации")
+            else:
+                st.success("✅ Данные получены через web-search")
+            
             # Display summary
             st.markdown("### 📊 Сводка")
             st.info(trends["summary"])
             
-            # Display timeline table
+            # Display interactive charts
             if trends.get("timeline"):
-                st.markdown("### 📅 Таблица изменений")
+                st.markdown("### 📈 График динамики")
+                try:
+                    # Main timeline chart
+                    product_names = {
+                        "credit_card": "Кредитной карты",
+                        "deposit": "Вклада",
+                        "consumer_loan": "Потребительского кредита"
+                    }
+                    product_name = product_names.get(product_type, product_type)
+                    
+                    fig1 = st.session_state.chart_gen.generate_timeline_chart(
+                        trends["timeline"],
+                        f"Динамика {product_name} - {bank}"
+                    )
+                    st.plotly_chart(fig1, use_container_width=True)
+                    
+                    # Detailed analysis chart with change histogram
+                    if trends.get("analysis") and trends["analysis"].get("status") == "success":
+                        st.markdown("### 🗓️ Детальный анализ")
+                        fig2 = st.session_state.chart_gen.generate_trend_analysis_chart(
+                            trends["timeline"],
+                            trends["analysis"]
+                        )
+                        st.plotly_chart(fig2, use_container_width=True)
+                        
+                        # Display statistics
+                        st.markdown("### 📊 Статистика")
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        analysis = trends["analysis"]
+                        with col1:
+                            st.metric(
+                                "Начальное значение",
+                                f"{analysis.get('start_value', 0):.2f}%"
+                            )
+                        with col2:
+                            st.metric(
+                                "Конечное значение",
+                                f"{analysis.get('end_value', 0):.2f}%",
+                                delta=f"{analysis.get('total_change', 0):+.2f}%"
+                            )
+                        with col3:
+                            st.metric(
+                                "Среднее значение",
+                                f"{analysis.get('average_value', 0):.2f}%"
+                            )
+                        with col4:
+                            st.metric(
+                                "Изменений",
+                                f"{analysis.get('change_points', 0)}"
+                            )
+                        
+                except Exception as e:
+                    st.error(f"Не удалось построить графики: {e}")
+                
+                # Display timeline table
+                st.markdown("### 📋 Таблица изменений")
                 import pandas as pd
                 timeline_df = pd.DataFrame(trends["timeline"])
                 st.dataframe(timeline_df, use_container_width=True)
