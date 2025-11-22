@@ -14,6 +14,7 @@ from openpyxl.drawing.image import Image as XLImage
 from io import BytesIO
 import tempfile
 import os
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,58 @@ class ReportGenerator:
             logger.warning("ChartGenerator not available, charts will be disabled")
             self.chart_generator = None
             self.charts_enabled = False
+    
+    def _convert_value_for_excel(self, value: Any) -> Any:
+        """
+        Convert complex data types to Excel-compatible formats.
+        
+        Args:
+            value: Value to convert
+            
+        Returns:
+            Excel-compatible value (str, int, float, bool, or None)
+        """
+        # Handle None
+        if value is None:
+            return "Н/Д"
+        
+        # Handle dict - convert to readable string
+        if isinstance(value, dict):
+            try:
+                # Format dict as key: value pairs
+                items = [f"{k}: {v}" for k, v in value.items()]
+                return "; ".join(items)
+            except:
+                return str(value)
+        
+        # Handle list/tuple - convert to comma-separated string
+        if isinstance(value, (list, tuple)):
+            try:
+                return ", ".join(str(item) for item in value)
+            except:
+                return str(value)
+        
+        # Handle bool
+        if isinstance(value, bool):
+            return "Да" if value else "Нет"
+        
+        # Handle datetime
+        if isinstance(value, datetime):
+            return value.strftime("%d.%m.%Y %H:%M")
+        
+        # Handle numeric types - return as is
+        if isinstance(value, (int, float)):
+            return value
+        
+        # Handle str - return as is
+        if isinstance(value, str):
+            return value
+        
+        # For any other type - convert to string
+        try:
+            return str(value)
+        except:
+            return "Н/Д"
     
     def generate_xlsx_comparison(self, comparison_data: Dict[str, Any]) -> BytesIO:
         """Generate XLSX file with comparison table and optional chart"""
@@ -52,12 +105,14 @@ class ReportGenerator:
         if comparison_df is not None:
             for r_idx, row in enumerate(comparison_df.values, start=4):
                 for c_idx, value in enumerate(row, start=1):
-                    ws.cell(row=r_idx, column=c_idx, value=value)
+                    # Convert value to Excel-compatible format
+                    excel_value = self._convert_value_for_excel(value)
+                    ws.cell(row=r_idx, column=c_idx, value=excel_value)
             
             # Add headers
             headers = comparison_df.columns
             for c_idx, header in enumerate(headers, start=1):
-                cell = ws.cell(row=3, column=c_idx, value=header)
+                cell = ws.cell(row=3, column=c_idx, value=str(header))
                 cell.font = Font(bold=True, color="FFFFFF")
                 cell.fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
         
@@ -68,13 +123,13 @@ class ReportGenerator:
         
         insights = comparison_data.get("insights", [])
         for idx, insight in enumerate(insights, start=2):
-            insights_ws[f'A{idx}'] = insight
+            insights_ws[f'A{idx}'] = str(insight)
         
         # Add recommendation
         recommendation = comparison_data.get("recommendation", "Недостаточно данных")
         insights_ws['A10'] = "Рекомендация:"
         insights_ws['A10'].font = Font(bold=True)
-        insights_ws['A11'] = recommendation
+        insights_ws['A11'] = str(recommendation)
         
         # Add chart if available
         if self.charts_enabled and self.chart_generator:
