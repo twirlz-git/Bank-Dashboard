@@ -4,14 +4,12 @@ modules/llm_comparator.py - LLM-powered intelligent product comparison
 Uses LLM to dynamically compare products based on actual available data,
 rather than relying on hardcoded field mappings.
 """
-
 import os
 import json
 import logging
 from typing import Dict, Any, List, Optional
 import pandas as pd
 from pathlib import Path
-
 from dotenv import load_dotenv, find_dotenv
 
 project_root = Path(__file__).parent.absolute()
@@ -20,24 +18,20 @@ load_dotenv(dotenv_path=env_path, override=True)
 
 logger = logging.getLogger(__name__)
 
-
 class LLMComparator:
     """LLM-powered product comparator that adapts to available data"""
 
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
         """
         Initialize LLM comparator with OpenRouter support.
-
         Args:
             api_key: API key (defaults to OPENROUTER_API_KEY or OPENAI_API_KEY)
             base_url: API base URL (defaults to OpenRouter if not specified)
         """
         # Prioritize OpenRouter key, fall back to OpenAI key
         self.api_key = "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"
-
         # Default to OpenRouter if no base_url is provided
         self.base_url = "https://openrouter.ai/api/v1"
-
         # Set a default OpenRouter model (e.g., Gemini Flash is fast/cheap for comparisons)
         self.model = "tngtech/deepseek-r1t2-chimera:free"
 
@@ -52,11 +46,13 @@ class LLMComparator:
                     api_key=self.api_key,
                     base_url=self.base_url
                 )
+                
                 if "openrouter" in self.base_url.lower():
                     self.client.default_headers.update({
                         "HTTP-Referer": "https://github.com/twirlz-git/Bank-Dashboard",
                         "X-Title": "Banking Product Comparator"
                     })
+                    
             except ImportError:
                 logger.error("openai package not installed. Run: pip install openai")
                 self.enabled = False
@@ -70,38 +66,38 @@ class LLMComparator:
     ) -> Dict[str, Any]:
         """
         Generate intelligent comparison using LLM.
-        
+
         Args:
             sber_data: Sberbank product data (raw JSON)
             competitor_data: Competitor product data (raw JSON)
             product_type: Type of product (credit_card, deposit, etc.)
             competitor_name: Name of competitor bank
-        
+
         Returns:
             Dict with comparison_table, insights, advantages, recommendation
         """
         if not self.enabled:
             logger.warning("LLM comparison disabled, falling back to basic comparison")
             return self._fallback_comparison(sber_data, competitor_data)
-        
+
         try:
             # Step 1: Ask LLM to extract and structure comparison data
             comparison_structure = self._get_comparison_structure(
                 sber_data, competitor_data, product_type, competitor_name
             )
-            
+
             # Step 2: Ask LLM to generate insights
             insights = self._generate_llm_insights(
                 comparison_structure, product_type, competitor_name
             )
-            
+
             # Step 3: Create comparison dataframe
             comparison_df = self._create_comparison_table(comparison_structure)
-            
+
             # Step 4: Extract advantages
             sber_advantages = comparison_structure.get("sber_advantages", [])
             competitor_advantages = comparison_structure.get("competitor_advantages", [])
-            
+
             return {
                 "comparison_table": comparison_df,
                 "insights": insights,
@@ -113,7 +109,7 @@ class LLMComparator:
                 ),
                 "llm_powered": True
             }
-            
+
         except Exception as e:
             logger.error(f"LLM comparison failed: {e}")
             return self._fallback_comparison(sber_data, competitor_data)
@@ -131,7 +127,7 @@ class LLMComparator:
         prompt = self._build_comparison_prompt(
             sber_data, competitor_data, product_type, competitor_name
         )
-        
+
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -147,7 +143,7 @@ class LLMComparator:
             response_format={"type": "json_object"},
             temperature=0.3  # Lower temperature for more consistent output
         )
-        
+
         result = json.loads(response.choices[0].message.content)
         logger.info(f"LLM comparison structure: {len(result.get('parameters', []))} parameters found")
         
@@ -169,7 +165,7 @@ class LLMComparator:
             "deposit": "вклад",
             "consumer_loan": "потребительский кредит",
         }.get(product_type, product_type)
-        
+
         return f"""Сравните два банковских продукта типа "{product_type_ru}".
 
 **Данные Сбербанка:**
@@ -189,23 +185,23 @@ class LLMComparator:
 
 **Верните JSON в следующем формате:**
 {{
-  "parameters": [
-    {{
-      "name": "Название параметра (на русском)",
-      "sber_value": "Значение для Сбера",
-      "competitor_value": "Значение для конкурента",
-      "is_better_for_sber": true/false/null
-    }}
-  ],
-  "sber_advantages": [
-    "• Преимущество 1",
-    "• Преимущество 2"
-  ],
-  "competitor_advantages": [
-    "• Преимущество 1",
-    "• Преимущество 2"
-  ],
-  "recommendation": "Краткая рекомендация (1-2 предложения)"
+    "parameters": [
+        {{
+            "name": "Название параметра (на русском)",
+            "sber_value": "Значение для Сбера",
+            "competitor_value": "Значение для конкурента",
+            "is_better_for_sber": true/false/null
+        }}
+    ],
+    "sber_advantages": [
+        "• Преимущество 1",
+        "• Преимущество 2"
+    ],
+    "competitor_advantages": [
+        "• Преимущество 1",
+        "• Преимущество 2"
+    ],
+    "recommendation": "Краткая рекомендация (1-2 предложения)"
 }}
 
 **Правила:**
@@ -214,6 +210,9 @@ class LLMComparator:
 - Для процентных ставок: меньше = лучше для кредитов, больше = лучше для вкладов
 - Для комиссий и стоимости: меньше = лучше
 - Будьте объективны и конкретны
+- Форматируйте текст преимуществ и рекомендаций используя Markdown:
+  - Выделяйте ключевые цифры и названия жирным шрифтом (**текст**)
+  - Используйте эмодзи, где уместно
 """
 
     def _generate_llm_insights(
@@ -236,16 +235,18 @@ class LLMComparator:
 - Начинаются с ✓ (для позитивных) или ⚠️ (для предупреждений)
 - Содержат конкретные цифры или факты
 - На русском языке
+- Используйте Markdown форматирование для улучшения читаемости:
+  - Выделяйте ключевые метрики и суммы жирным шрифтом (**текст**)
 
 **Формат ответа (JSON):**
 {{
-  "insights": [
-    "✓ Первый вывод",
-    "⚠️ Второй вывод"
-  ]
+    "insights": [
+        "✓ Первый вывод",
+        "⚠️ Второй вывод"
+    ]
 }}
 """
-        
+
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -262,10 +263,10 @@ class LLMComparator:
                 response_format={"type": "json_object"},
                 temperature=0.5
             )
-            
+
             result = json.loads(response.choices[0].message.content)
             return result.get("insights", [])
-            
+
         except Exception as e:
             logger.error(f"Failed to generate insights: {e}")
             return ["⚠️ Не удалось сгенерировать выводы"]
@@ -282,7 +283,7 @@ class LLMComparator:
                 "Сбер": ["Н/Д"],
                 "Конкурент": ["Н/Д"]
             })
-        
+
         df = pd.DataFrame({
             "Параметр": [p["name"] for p in parameters],
             "Сбер": [p["sber_value"] for p in parameters],
