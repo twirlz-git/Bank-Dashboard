@@ -17,24 +17,39 @@ logger = logging.getLogger(__name__)
 class LLMComparator:
     """LLM-powered product comparator that adapts to available data"""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
         """
-        Initialize LLM comparator.
-        
+        Initialize LLM comparator with OpenRouter support.
+
         Args:
-            api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
+            api_key: API key (defaults to OPENROUTER_API_KEY or OPENAI_API_KEY)
+            base_url: API base URL (defaults to OpenRouter if not specified)
         """
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # Cheaper model for comparisons
-        
+        # Prioritize OpenRouter key, fall back to OpenAI key
+        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
+
+        # Default to OpenRouter if no base_url is provided
+        self.base_url = base_url or os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+
+        # Set a default OpenRouter model (e.g., Gemini Flash is fast/cheap for comparisons)
+        self.model = os.getenv("OPENAI_MODEL", "google/gemini-2.0-flash-001")
+
         if not self.api_key:
-            logger.warning("No OpenAI API key found. LLM comparison will be disabled.")
+            logger.warning("No API key found. LLM comparison will be disabled.")
             self.enabled = False
         else:
             self.enabled = True
             try:
                 from openai import OpenAI
-                self.client = OpenAI(api_key=self.api_key)
+                self.client = OpenAI(
+                    api_key=self.api_key,
+                    base_url=self.base_url,
+                    # OpenRouter recommends these headers to identify your app
+                    default_headers={
+                        "HTTP-Referer": "https://github.com/your-repo/banking-comparator",
+                        "X-Title": "Banking Product Comparator"
+                    }
+                )
             except ImportError:
                 logger.error("openai package not installed. Run: pip install openai")
                 self.enabled = False
