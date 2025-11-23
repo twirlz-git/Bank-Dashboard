@@ -10,3 +10,4 @@ plotly>=5.18.0
 aiohttp>=3.9.0
 pydantic>=2.5.0
 kaleido>=0.2.1
+reportlab>=4.0.0

@@ -1,5 +1,5 @@
 """
-modules/report_generator.py - Generate XLSX and JSON reports with chart support
+modules/report_generator.py - Generate XLSX, PDF and JSON reports with chart support
 """
 
 import logging
@@ -19,7 +19,7 @@ import json
 logger = logging.getLogger(__name__)
 
 class ReportGenerator:
-    """Generate XLSX and JSON format reports with chart visualization"""
+    """Generate XLSX, PDF and JSON format reports with chart visualization"""
     
     def __init__(self):
         """Initialize report generator"""
@@ -31,6 +31,19 @@ class ReportGenerator:
             logger.warning("ChartGenerator not available, charts will be disabled")
             self.chart_generator = None
             self.charts_enabled = False
+        
+        # Check PDF library availability
+        try:
+            from reportlab.lib.pagesizes import letter, A4
+            from reportlab.lib import colors
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.units import inch
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage, PageBreak
+            self.pdf_enabled = True
+            logger.info("PDF generation enabled")
+        except ImportError:
+            self.pdf_enabled = False
+            logger.warning("reportlab not installed. PDF generation disabled. Install: pip install reportlab")
     
     def _convert_value_for_excel(self, value: Any) -> Any:
         """
@@ -172,6 +185,368 @@ class ReportGenerator:
         wb.save(output)
         output.seek(0)
         return output
+    
+    def generate_pdf_comparison(self, comparison_data: Dict[str, Any]) -> BytesIO:
+        """
+        Generate PDF report with comparison table, insights, and charts.
+        
+        Args:
+            comparison_data: Comparison data dict with table, insights, advantages, recommendation
+            
+        Returns:
+            BytesIO with PDF content
+        """
+        if not self.pdf_enabled:
+            logger.error("PDF generation not available. Install reportlab: pip install reportlab")
+            raise RuntimeError("PDF generation requires reportlab library")
+        
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage, PageBreak
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT
+        
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
+        
+        # Container for elements
+        elements = []
+        
+        # Styles
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=18,
+            textColor=colors.HexColor('#366092'),
+            spaceAfter=12,
+            alignment=TA_CENTER
+        )
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=14,
+            textColor=colors.HexColor('#366092'),
+            spaceAfter=8
+        )
+        
+        # Title
+        title = Paragraph("Сравнение банковских продуктов", title_style)
+        elements.append(title)
+        
+        # Timestamp
+        timestamp = Paragraph(f"Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}", styles['Normal'])
+        elements.append(timestamp)
+        elements.append(Spacer(1, 0.3*inch))
+        
+        # LLM indicator
+        if comparison_data.get("llm_powered", False):
+            llm_note = Paragraph("🤖 <b>Сравнение сгенерировано с помощью LLM</b>", styles['Normal'])
+            elements.append(llm_note)
+            elements.append(Spacer(1, 0.2*inch))
+        
+        # Comparison table
+        comparison_df = comparison_data.get("comparison_table")
+        if comparison_df is not None:
+            heading = Paragraph("📋 Сравнительная таблица", heading_style)
+            elements.append(heading)
+            elements.append(Spacer(1, 0.1*inch))
+            
+            # Prepare table data
+            table_data = [comparison_df.columns.tolist()]  # Headers
+            for row in comparison_df.values:
+                table_data.append([self._convert_value_for_excel(val) for val in row])
+            
+            # Create table
+            table = Table(table_data, repeatRows=1)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#366092')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTSIZE', (0, 1), (-1, -1), 9),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ]))
+            elements.append(table)
+            elements.append(Spacer(1, 0.3*inch))
+        
+        # Key insights
+        insights = comparison_data.get("insights", [])
+        if insights:
+            heading = Paragraph("💡 Ключевые выводы", heading_style)
+            elements.append(heading)
+            elements.append(Spacer(1, 0.1*inch))
+            
+            for insight in insights:
+                # Clean markdown formatting for PDF
+                clean_insight = self._clean_markdown_for_pdf(str(insight))
+                insight_para = Paragraph(f"• {clean_insight}", styles['Normal'])
+                elements.append(insight_para)
+                elements.append(Spacer(1, 0.1*inch))
+            
+            elements.append(Spacer(1, 0.2*inch))
+        
+        # Advantages
+        sber_advantages = comparison_data.get("sber_advantages", [])
+        competitor_advantages = comparison_data.get("competitor_advantages", [])
+        
+        if sber_advantages or competitor_advantages:
+            elements.append(PageBreak())
+            
+            if sber_advantages:
+                heading = Paragraph("✅ Преимущества Сбера", heading_style)
+                elements.append(heading)
+                elements.append(Spacer(1, 0.1*inch))
+                
+                for adv in sber_advantages:
+                    clean_adv = self._clean_markdown_for_pdf(str(adv))
+                    adv_para = Paragraph(clean_adv, styles['Normal'])
+                    elements.append(adv_para)
+                    elements.append(Spacer(1, 0.1*inch))
+                
+                elements.append(Spacer(1, 0.2*inch))
+            
+            if competitor_advantages:
+                heading = Paragraph("⚡ Преимущества конкурента", heading_style)
+                elements.append(heading)
+                elements.append(Spacer(1, 0.1*inch))
+                
+                for adv in competitor_advantages:
+                    clean_adv = self._clean_markdown_for_pdf(str(adv))
+                    adv_para = Paragraph(clean_adv, styles['Normal'])
+                    elements.append(adv_para)
+                    elements.append(Spacer(1, 0.1*inch))
+                
+                elements.append(Spacer(1, 0.2*inch))
+        
+        # Recommendation
+        recommendation = comparison_data.get("recommendation", "")
+        if recommendation:
+            heading = Paragraph("🎯 Рекомендация", heading_style)
+            elements.append(heading)
+            elements.append(Spacer(1, 0.1*inch))
+            
+            clean_rec = self._clean_markdown_for_pdf(str(recommendation))
+            rec_para = Paragraph(clean_rec, styles['Normal'])
+            elements.append(rec_para)
+        
+        # Add chart if available
+        if self.charts_enabled and self.chart_generator:
+            try:
+                elements.append(PageBreak())
+                heading = Paragraph("📊 Визуализация", heading_style)
+                elements.append(heading)
+                elements.append(Spacer(1, 0.2*inch))
+                
+                fig = self.chart_generator.generate_comparison_chart(comparison_data)
+                img_path = self._save_chart_temp(fig)
+                
+                if img_path:
+                    img = RLImage(img_path, width=5*inch, height=3.5*inch)
+                    elements.append(img)
+                    os.unlink(img_path)
+            except Exception as e:
+                logger.error(f"Failed to add chart to PDF: {e}")
+        
+        # Build PDF
+        doc.build(elements)
+        buffer.seek(0)
+        return buffer
+    
+    def generate_pdf_trends(self, trends_data: Dict[str, Any]) -> BytesIO:
+        """
+        Generate PDF report with trends analysis and charts.
+        
+        Args:
+            trends_data: Trends data dict with timeline, analysis, summary
+            
+        Returns:
+            BytesIO with PDF content
+        """
+        if not self.pdf_enabled:
+            logger.error("PDF generation not available. Install reportlab: pip install reportlab")
+            raise RuntimeError("PDF generation requires reportlab library")
+        
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage, PageBreak
+        from reportlab.lib.enums import TA_CENTER
+        
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
+        
+        elements = []
+        
+        # Styles
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=18,
+            textColor=colors.HexColor('#366092'),
+            spaceAfter=12,
+            alignment=TA_CENTER
+        )
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=14,
+            textColor=colors.HexColor('#366092'),
+            spaceAfter=8
+        )
+        
+        # Title
+        title = Paragraph("Анализ трендов банковских продуктов", title_style)
+        elements.append(title)
+        elements.append(Spacer(1, 0.2*inch))
+        
+        # Metadata
+        bank = trends_data.get('bank', 'Н/Д')
+        product_type = trends_data.get('product_type', 'Н/Д')
+        start_date = trends_data.get('start_date', 'Н/Д')
+        end_date = trends_data.get('end_date', 'Н/Д')
+        
+        info_para = Paragraph(
+            f"<b>Банк:</b> {bank}<br/>"
+            f"<b>Продукт:</b> {product_type}<br/>"
+            f"<b>Период:</b> {start_date} — {end_date}<br/>"
+            f"<b>Дата отчета:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+            styles['Normal']
+        )
+        elements.append(info_para)
+        elements.append(Spacer(1, 0.3*inch))
+        
+        # Data source indicator
+        data_source = trends_data.get('data_source', 'unknown')
+        confidence = trends_data.get('confidence', 0.5)
+        
+        source_text = {
+            'mock': '⚠️ Используются демо-данные',
+            'real_data_based': '✅ Данные из реальных источников',
+            'web_search': '✅ Данные получены через web-search'
+        }.get(data_source, f'📊 Источник: {data_source}')
+        
+        source_para = Paragraph(f"{source_text} | Достоверность: {confidence:.0%}", styles['Normal'])
+        elements.append(source_para)
+        elements.append(Spacer(1, 0.2*inch))
+        
+        # Summary
+        summary = trends_data.get('summary', '')
+        if summary:
+            heading = Paragraph("📊 Сводка", heading_style)
+            elements.append(heading)
+            elements.append(Spacer(1, 0.1*inch))
+            
+            clean_summary = self._clean_markdown_for_pdf(summary)
+            summary_para = Paragraph(clean_summary, styles['Normal'])
+            elements.append(summary_para)
+            elements.append(Spacer(1, 0.3*inch))
+        
+        # Timeline table
+        timeline = trends_data.get('timeline', [])
+        if timeline:
+            elements.append(PageBreak())
+            heading = Paragraph("📋 Таблица изменений", heading_style)
+            elements.append(heading)
+            elements.append(Spacer(1, 0.1*inch))
+            
+            # Prepare table data
+            table_data = [["Дата", "Ставка (%)", "Причина", "Достоверность"]]
+            for item in timeline:
+                table_data.append([
+                    item.get("date", "Н/Д"),
+                    f"{item.get('rate', 0):.2f}",
+                    item.get("reason", "Н/Д"),
+                    f"{item.get('confidence', 0.5):.0%}"
+                ])
+            
+            table = Table(table_data, repeatRows=1)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#366092')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ]))
+            elements.append(table)
+            elements.append(Spacer(1, 0.3*inch))
+        
+        # Statistics
+        analysis = trends_data.get('analysis', {})
+        if analysis and analysis.get('status') == 'success':
+            elements.append(PageBreak())
+            heading = Paragraph("📈 Статистика", heading_style)
+            elements.append(heading)
+            elements.append(Spacer(1, 0.1*inch))
+            
+            stats_text = f"""
+            <b>Начальное значение:</b> {analysis.get('start_value', 0):.2f}%<br/>
+            <b>Конечное значение:</b> {analysis.get('end_value', 0):.2f}%<br/>
+            <b>Среднее значение:</b> {analysis.get('average_value', 0):.2f}%<br/>
+            <b>Диапазон:</b> {analysis.get('min_value', 0):.2f}% — {analysis.get('max_value', 0):.2f}%<br/>
+            <b>Общее изменение:</b> {analysis.get('total_change', 0):+.2f}% ({analysis.get('change_percentage', 0):+.1f}%)<br/>
+            <b>Точек данных:</b> {analysis.get('data_points', 0)}<br/>
+            <b>Точек изменения:</b> {analysis.get('change_points', 0)}
+            """
+            stats_para = Paragraph(stats_text, styles['Normal'])
+            elements.append(stats_para)
+            elements.append(Spacer(1, 0.2*inch))
+        
+        # Add charts if available
+        if self.charts_enabled and self.chart_generator and timeline:
+            try:
+                elements.append(PageBreak())
+                heading = Paragraph("📊 Визуализация трендов", heading_style)
+                elements.append(heading)
+                elements.append(Spacer(1, 0.2*inch))
+                
+                fig = self.chart_generator.generate_timeline_chart(timeline, f"Динамика {product_type} - {bank}")
+                img_path = self._save_chart_temp(fig)
+                
+                if img_path:
+                    img = RLImage(img_path, width=6*inch, height=3.5*inch)
+                    elements.append(img)
+                    os.unlink(img_path)
+                    
+            except Exception as e:
+                logger.error(f"Failed to add chart to PDF: {e}")
+        
+        # Build PDF
+        doc.build(elements)
+        buffer.seek(0)
+        return buffer
+    
+    def _clean_markdown_for_pdf(self, text: str) -> str:
+        """
+        Clean markdown formatting for PDF rendering.
+        Converts basic markdown to HTML-like tags for reportlab.
+        """
+        import re
+        
+        # Bold: **text** -> <b>text</b>
+        text = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', text)
+        
+        # Italic: *text* -> <i>text</i>
+        text = re.sub(r'\*([^*]+)\*', r'<i>\1</i>', text)
+        
+        # Remove markdown bullets (•) - they're added manually
+        text = text.replace('•', '')
+        
+        # Line breaks
+        text = text.replace('\n', '<br/>')
+        
+        return text
     
     def generate_xlsx_trends(self, trends_data: Dict[str, Any]) -> BytesIO:
         """Generate XLSX file with trends analysis and charts"""
@@ -320,11 +695,11 @@ class ReportGenerator:
             logger.error(f"Failed to save chart to temp file: {e}")
             return None
     
-    def get_filename(self, mode: str, bank: str = "", product_type: str = "") -> str:
+    def get_filename(self, mode: str, bank: str = "", product_type: str = "", format: str = "xlsx") -> str:
         """Generate filename for report"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         if mode == "urgent":
-            return f"сравнение_{bank}_{timestamp}.xlsx"
+            return f"сравнение_{bank}_{timestamp}.{format}"
         else:
-            return f"тренды_{bank}_{product_type}_{timestamp}.xlsx"
+            return f"тренды_{bank}_{product_type}_{timestamp}.{format}"
