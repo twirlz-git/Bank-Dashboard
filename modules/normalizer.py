@@ -19,10 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 class DataNormalizer:
-    """Normalize various data formats to a unified schema."""
+    """Нормализация различных форматов данных к единой схеме."""
 
     def normalize_credit_card(self, raw_data: Dict[str, Any], bank: str) -> Dict[str, Any]:
-        """Normalize credit card data using field mappings."""
+        """Нормализация данных кредитной карты."""
         return self._normalize_with_mapping(raw_data, bank, "credit_card", {
             "product_name": self._get_product_name,
             "interest_rate": self._get_interest_rate,
@@ -35,17 +35,30 @@ class DataNormalizer:
             "commission": lambda d: d.get("комиссия", "Н/Д"),
         })
 
+    def normalize_debit_card(self, raw_data: Dict[str, Any], bank: str) -> Dict[str, Any]:
+        """
+        Нормализация данных дебетовой карты.
+        Дебетовые карты имеют процент на остаток вместо процентной ставки.
+        """
+        return self._normalize_with_mapping(raw_data, bank, "debit_card", {
+            "product_name": self._get_product_name,
+            "annual_fee": self._get_annual_fee,
+            "interest_on_balance": self._get_interest_rate,  # Процент на остаток
+            "cashback": self._get_cashback,
+            "loyalty_program": lambda d: d.get("программа_лояльности", "Н/Д"),
+            "sms_notifications": lambda d: d.get("смс", "Н/Д"),
+            "withdrawals": self._get_withdrawals,
+            "transfers": self._get_transfers,
+            "monthly_limit": lambda d: d.get("лимит_месячный", "Н/Д"),
+        })
+
     def normalize_deposit(self, raw_data: Dict[str, Any], bank: str) -> Dict[str, Any]:
         """
-        Normalize deposit data to a unified schema.
-        Can handle both debit card data and actual deposit data.
+        Нормализация данных вклада.
         """
         return self._normalize_with_mapping(raw_data, bank, "deposit", {
             "product_name": self._get_product_name,
             "interest_rate": self._get_interest_rate,
-            "annual_fee": self._get_annual_fee,
-            "cashback": self._get_cashback,
-            "loyalty_program": lambda d: d.get("программа_лояльности", "Н/Д"),
             "term_months": lambda d: d.get("срок", "Н/Д"),
             "min_amount": lambda d: d.get("минимальная_сумма", "Н/Д"),
             "max_amount": lambda d: d.get("максимальная_сумма", "Н/Д"),
@@ -56,7 +69,7 @@ class DataNormalizer:
 
     def normalize_consumer_loan(self, raw_data: Dict[str, Any], bank: str) -> Dict[str, Any]:
         """
-        Normalize consumer loan data to a unified schema.
+        Нормализация данных потребительского кредита.
         """
         return self._normalize_with_mapping(raw_data, bank, "consumer_loan", {
             "product_name": self._get_product_name,
@@ -76,16 +89,16 @@ class DataNormalizer:
         field_extractors: Dict[str, callable]
     ) -> Dict[str, Any]:
         """
-        Generic normalization using field mappings and extractors.
+        Общая нормализация с использованием field mappings и extractors.
         
         Args:
-            raw_data: Raw data from JSON file
-            bank: Bank name
-            product_type: Type of product (credit_card, deposit, etc.)
-            field_extractors: Dict of field_name -> extraction_function
+            raw_data: Исходные данные из JSON файла
+            bank: Название банка
+            product_type: Тип продукта (credit_card, debit_card, deposit, и т.д.)
+            field_extractors: Dict из field_name -> extraction_function
         
         Returns:
-            Normalized data dict
+            Нормализованный dict с данными
         """
         normalized = {"bank": bank}
         
@@ -101,14 +114,14 @@ class DataNormalizer:
 
     def _get_field_value(self, data: Dict[str, Any], field_aliases: list) -> Any:
         """
-        Get field value trying multiple possible field names.
+        Получить значение поля, пробуя несколько возможных имен.
         
         Args:
-            data: Source data dict
-            field_aliases: List of possible field names to try
+            data: Исходные данные dict
+            field_aliases: Список возможных имен полей
         
         Returns:
-            Field value or None if not found
+            Значение поля или None если не найдено
         """
         for alias in field_aliases:
             if alias in data:
@@ -120,12 +133,12 @@ class DataNormalizer:
     # ========================================================================
 
     def _get_product_name(self, data: Dict[str, Any]) -> str:
-        """Extract product name from various possible fields."""
+        """Извлечь название продукта из различных полей."""
         name = self._get_field_value(data, ["название", "карта", "product_name"])
         return str(name) if name else "Н/Д"
 
     def _get_interest_rate(self, data: Dict[str, Any]) -> str:
-        """Extract and format interest rate."""
+        """Извлечь и отформатировать процентную ставку."""
         rate = self._get_field_value(data, [
             "ставка", 
             "процент", 
@@ -135,7 +148,7 @@ class DataNormalizer:
         return self._format_rate(rate)
 
     def _get_grace_period(self, data: Dict[str, Any]) -> str:
-        """Extract and format grace period (handles dict and string)."""
+        """Извлечь и отформатировать льготный период (обрабатывает dict и string)."""
         grace = self._get_field_value(data, ["грейс_период", "grace_period"])
         
         if isinstance(grace, dict):
@@ -146,12 +159,12 @@ class DataNormalizer:
         return self._format_period(grace)
 
     def _get_cashback(self, data: Dict[str, Any]) -> str:
-        """Extract and format cashback."""
+        """Извлечь и отформатировать кэшбэк."""
         cashback = self._get_field_value(data, ["кешбек", "cashback"])
         return self._format_cashback(cashback)
 
     def _get_annual_fee(self, data: Dict[str, Any]) -> str:
-        """Extract and format annual fee."""
+        """Извлечь и отформатировать годовую плату."""
         fee = self._get_field_value(data, [
             "стоимость",
             "стоимость_обслуживания",
@@ -160,7 +173,7 @@ class DataNormalizer:
         return self._format_fee(fee)
 
     def _get_max_limit(self, data: Dict[str, Any]) -> str:
-        """Extract and format maximum limit/amount."""
+        """Извлечь и отформатировать максимальный лимит/сумму."""
         limit = self._get_field_value(data, [
             "лимит",
             "кредитный_лимит",
@@ -170,19 +183,37 @@ class DataNormalizer:
         return self._format_amount(limit)
 
     def _get_min_payment(self, data: Dict[str, Any]) -> str:
-        """Extract minimum payment."""
+        """Извлечь минимальный платеж."""
         min_pay = self._get_field_value(data, [
             "минимальный_платеж",
             "min_payment"
         ])
         return str(min_pay) if min_pay else "Н/Д"
 
+    def _get_withdrawals(self, data: Dict[str, Any]) -> str:
+        """Извлечь информацию о снятии наличных."""
+        withdrawals = self._get_field_value(data, ["снятие_наличных", "withdrawals"])
+        if isinstance(withdrawals, dict):
+            # Форматировать dict в читабельную строку
+            parts = [f"{k}: {v}" for k, v in withdrawals.items()]
+            return "; ".join(parts)
+        return str(withdrawals) if withdrawals else "Н/Д"
+
+    def _get_transfers(self, data: Dict[str, Any]) -> str:
+        """Извлечь информацию о переводах."""
+        transfers = self._get_field_value(data, ["переводы", "transfers"])
+        if isinstance(transfers, dict):
+            # Форматировать dict в читабельную строку
+            parts = [f"{k}: {v}" for k, v in transfers.items()]
+            return "; ".join(parts)
+        return str(transfers) if transfers else "Н/Д"
+
     # ========================================================================
     # FORMATTING METHODS
     # ========================================================================
 
     def _format_rate(self, value: Any) -> str:
-        """Format interest rate with better handling of various formats."""
+        """Форматировать процентную ставку с лучшей обработкой различных форматов."""
         if value is None or value == "Нет":
             return "Н/Д"
         
@@ -206,14 +237,14 @@ class DataNormalizer:
         return value_str
 
     def _format_grace_period(self, value: Any) -> str:
-        """Format grace period, handling dict structures."""
+        """Форматировать льготный период, обрабатывая dict структуры."""
         if isinstance(value, dict):
             period = value.get('покупки', "Н/Д")
             return self._format_period(period)
         return self._format_period(value)
 
     def _format_period(self, value: Any) -> str:
-        """Format time period (days, months, etc.)."""
+        """Форматировать временной период (дни, месяцы, и т.д.)."""
         if value is None or value == "Н/Д":
             return "Н/Д"
         
@@ -231,7 +262,7 @@ class DataNormalizer:
             return value_str
 
     def _format_cashback(self, value: Any) -> str:
-        """Format cashback with better handling of various formats."""
+        """Форматировать кэшбэк с лучшей обработкой различных форматов."""
         if value is None:
             return "Н/Д"
         
@@ -246,7 +277,7 @@ class DataNormalizer:
         return str(value)
 
     def _format_fee(self, value: Any) -> str:
-        """Format fee with better handling of "Бесплатно" and various formats."""
+        """Форматировать плату с лучшей обработкой 'Бесплатно' и различных форматов."""
         if value is None:
             return "Н/Д"
         
@@ -268,7 +299,7 @@ class DataNormalizer:
         return str(value)
 
     def _format_amount(self, value: Any) -> str:
-        """Format monetary amount with better handling."""
+        """Форматировать денежную сумму с лучшей обработкой."""
         if value is None:
             return "Н/Д"
         
@@ -290,7 +321,7 @@ class DataNormalizer:
             return value_str
 
     def _format_bool(self, value: Any) -> str:
-        """Format boolean values to Russian."""
+        """Форматировать булевы значения на русский."""
         if isinstance(value, bool):
             return "Да" if value else "Нет"
         
