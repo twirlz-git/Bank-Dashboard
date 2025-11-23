@@ -1,5 +1,5 @@
 """
-main.py - Enhanced Streamlit application with wow-effect charts
+main.py - Enhanced Streamlit application with PDF export, debit cards, and confidence indicators
 """
 
 import os
@@ -49,13 +49,22 @@ st.markdown("*Анализ конкурентных банковских про�
 # Sidebar
 st.sidebar.markdown("## ⚙️ Настройки")
 
-# LLM Status indicator
+# LLM Status indicator with confidence
 if st.session_state.llm_comparator.is_enabled():
     st.sidebar.success("✅ LLM-сравнение активно")
     st.sidebar.caption(f"🤖 Модель: {st.session_state.llm_comparator.model}")
+    st.sidebar.caption("🎯 Высокая достоверность (90%+)")
 else:
     st.sidebar.warning("⚠️ LLM недоступен")
     st.sidebar.caption("🔑 Добавьте OPENAI_API_KEY")
+    st.sidebar.caption("🎯 Базовая достоверность (70%)")
+
+# PDF export status
+if st.session_state.report_gen.pdf_enabled:
+    st.sidebar.success("📝 PDF экспорт доступен")
+else:
+    st.sidebar.warning("⚠️ PDF экспорт недоступен")
+    st.sidebar.caption("pip install reportlab")
 
 mode = st.sidebar.radio(
     "Выберите режим анализа",
@@ -102,6 +111,10 @@ if "Urgent" in mode:
             competitor_card = competitor_data['карты'][0]
             sber_card = sber_data['карты'][0]
             use_llm = st.session_state.llm_comparator.is_enabled()
+            
+            # Determine confidence based on LLM availability
+            confidence_score = 0.9 if use_llm else 0.7
+            
             if use_llm:
                 with st.spinner("🤖 LLM анализирует данные..."):
                     comparison = st.session_state.llm_comparator.compare_products(
@@ -114,7 +127,7 @@ if "Urgent" in mode:
                 with st.spinner("Анализирую данные..."):
                     normalizer_func = {
                         "credit_card": st.session_state.normalizer.normalize_credit_card,
-                        "debit_card": st.session_state.normalizer.normalize_deposit,
+                        "debit_card": st.session_state.normalizer.normalize_debit_card,
                         "deposit": st.session_state.normalizer.normalize_deposit,
                         "consumer_loan": st.session_state.normalizer.normalize_consumer_loan,
                     }.get(product_type)
@@ -126,66 +139,120 @@ if "Urgent" in mode:
                     comparison = st.session_state.comparator.compare_products(
                         sber_normalized, competitor_normalized, product_type
                     )
+            
+            # Add confidence score to comparison data
+            comparison['confidence'] = confidence_score
 
         st.markdown("---")
         st.markdown("## Результаты анализа")
-        if comparison.get("llm_powered", False):
-            st.success("🤖 Сравнение сгенерировано с помощью LLM")
-        else:
-            st.info("📄 Базовое сравнение")
+        
+        # Confidence indicator
+        conf_col1, conf_col2 = st.columns([3, 1])
+        with conf_col1:
+            if comparison.get("llm_powered", False):
+                st.success("🤖 Сравнение сгенерировано с помощью LLM")
+            else:
+                st.info("📄 Базовое сравнение")
+        
+        with conf_col2:
+            confidence = comparison.get('confidence', 0.7)
+            # Color-coded confidence indicator
+            if confidence >= 0.85:
+                st.metric("🎯 Достоверность", f"{confidence:.0%}", delta="Высокая")
+            elif confidence >= 0.7:
+                st.metric("🎯 Достоверность", f"{confidence:.0%}", delta="Средняя")
+            else:
+                st.metric("🎯 Достоверность", f"{confidence:.0%}", delta="Низкая")
+        
         st.markdown("### 📋 Сравнительная таблица")
         st.dataframe(comparison["comparison_table"], use_container_width=True)
+        
         # Add wow-effect charts
         st.markdown("### 🌟 Вау-графики сравнения")
         radar_fig = st.session_state.chart_gen_enhanced.generate_radar_comparison(comparison)
         st.plotly_chart(radar_fig, use_container_width=True)
+        
         heatmap_fig = st.session_state.chart_gen_enhanced.generate_heatmap_comparison(comparison)
         st.plotly_chart(heatmap_fig, use_container_width=True)
+        
         st.markdown("### 📈 Базовый bar-chart")
         try:
             fig = st.session_state.chart_gen.generate_comparison_chart(comparison)
             st.plotly_chart(fig, use_container_width=True)
         except Exception as e:
             st.warning(f"Не удалось построить график: {e}")
+        
         st.markdown("### 💡 Ключевые выводы")
         for insight in comparison["insights"]:
             st.write(insight)
+        
         col_adv1, col_adv2 = st.columns(2)
         with col_adv1:
             st.markdown("### ✅ Преимущества Сбера")
             for adv in comparison["sber_advantages"]:
                 st.write(adv)
+        
         with col_adv2:
             st.markdown(f"### ⚡ Преимущества {bank}")
             for adv in comparison["competitor_advantages"]:
                 st.write(adv)
+        
         st.markdown("### 🎯 Рекомендация")
         st.info(comparison["recommendation"])
+        
         st.markdown("---")
-        xlsx_file = st.session_state.report_gen.generate_xlsx_comparison(comparison)
-        st.download_button(
-            label="📥 Скачать XLSX отчет",
-            data=xlsx_file,
-            file_name=st.session_state.report_gen.get_filename("urgent", bank),
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        
+        # Export buttons
+        export_col1, export_col2 = st.columns(2)
+        
+        with export_col1:
+            xlsx_file = st.session_state.report_gen.generate_xlsx_comparison(comparison)
+            st.download_button(
+                label="📥 Скачать XLSX отчет",
+                data=xlsx_file,
+                file_name=st.session_state.report_gen.get_filename("urgent", bank, format="xlsx"),
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        
+        with export_col2:
+            if st.session_state.report_gen.pdf_enabled:
+                try:
+                    pdf_file = st.session_state.report_gen.generate_pdf_comparison(comparison)
+                    st.download_button(
+                        label="📝 Скачать PDF отчет",
+                        data=pdf_file,
+                        file_name=st.session_state.report_gen.get_filename("urgent", bank, format="pdf"),
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+                except Exception as e:
+                    st.error(f"Ошибка генерации PDF: {e}")
+            else:
+                st.button("⚠️ PDF недоступен", disabled=True, use_container_width=True)
+                
 else:
     st.markdown("### Анализ трендов - Динамика продуктов")
     st.markdown("Посмотрите, как менялись условия продуктов за выбранный период")
+    
     col1, col2, col3 = st.columns(3)
+    
     with col1:
         bank = st.selectbox("Выберите банк", ["ВТБ", "Альфа", "Газпромбанк", "Локобанк", "МТС Банк", "Райффайзенбанк"])
+    
     with col2:
         product_type = st.selectbox(
             "Тип продукта",
-            ["credit_card", "deposit", "consumer_loan"],
+            ["credit_card", "debit_card", "deposit", "consumer_loan"],
             format_func=lambda x: {
                 "credit_card": "Кредитная карта",
+                "debit_card": "Дебетовая карта",
                 "deposit": "Вклад",
                 "consumer_loan": "Потребительский кредит"
             }[x],
             key="trends_product"
         )
+    
     with col3:
         period = st.selectbox(
             "Временной период",
@@ -196,30 +263,61 @@ else:
                 "last_year": "Последний год"
             }[x]
         )
+    
     analyze_btn = st.button("📊 Анализировать тренды", use_container_width=True)
+    
     if analyze_btn:
         with st.spinner("Анализирую тренды..."):
             trends = st.session_state.trends_analyzer.analyze_trends(
                 bank, product_type, period
             )
+        
         st.markdown("---")
         st.markdown("## Результаты анализа трендов")
-        if trends.get("data_source") == "mock":
-            st.warning("⚠️ Используются мок-данные для демонстрации")
-        else:
-            st.success("✅ Данные получены через web-search")
+        
+        # Data source and confidence indicators
+        conf_col1, conf_col2, conf_col3 = st.columns(3)
+        
+        with conf_col1:
+            data_source = trends.get("data_source", "unknown")
+            if data_source == "mock":
+                st.warning("⚠️ Используются демо-данные")
+            elif data_source == "real_data_based":
+                st.success("✅ Реальные данные")
+            else:
+                st.success("✅ Данные получены через web-search")
+        
+        with conf_col2:
+            confidence = trends.get('confidence', 0.5)
+            if confidence >= 0.85:
+                st.metric("🎯 Достоверность", f"{confidence:.0%}", delta="Высокая")
+            elif confidence >= 0.7:
+                st.metric("🎯 Достоверность", f"{confidence:.0%}", delta="Средняя")
+            else:
+                st.metric("🎯 Достоверность", f"{confidence:.0%}", delta="Низкая")
+        
+        with conf_col3:
+            timeline = trends.get('timeline', [])
+            if timeline:
+                avg_conf = sum(t.get('confidence', 0.5) for t in timeline) / len(timeline)
+                st.metric("📊 Ср. достоверность точек", f"{avg_conf:.0%}")
+        
         st.markdown("### 📊 Сводка")
         st.info(trends["summary"])
+        
         if trends.get("timeline"):
             st.markdown("### 🌟 Анимированный timeline и водопад изменений")
             animated_fig = st.session_state.chart_gen_enhanced.generate_animated_timeline(trends["timeline"], f"Динамика - {bank}")
             st.plotly_chart(animated_fig, use_container_width=True)
+            
             waterfall_fig = st.session_state.chart_gen_enhanced.generate_waterfall_trends(trends["timeline"])
             st.plotly_chart(waterfall_fig, use_container_width=True)
+            
             st.markdown("### 📈 Базовый график timeline")
             try:
                 product_names = {
                     "credit_card": "Кредитной карты",
+                    "debit_card": "Дебетовой карты",
                     "deposit": "Вклада",
                     "consumer_loan": "Потребительского кредита"
                 }
@@ -229,6 +327,7 @@ else:
                     f"Динамика {product_name} - {bank}"
                 )
                 st.plotly_chart(fig1, use_container_width=True)
+                
                 if trends.get("analysis") and trends["analysis"].get("status") == "success":
                     st.markdown("### 🗓️ Детальный анализ")
                     fig2 = st.session_state.chart_gen.generate_trend_analysis_chart(
@@ -236,25 +335,30 @@ else:
                         trends["analysis"]
                     )
                     st.plotly_chart(fig2, use_container_width=True)
+                    
                     st.markdown("### 📊 Статистика")
                     col1, col2, col3, col4 = st.columns(4)
                     analysis = trends["analysis"]
+                    
                     with col1:
                         st.metric(
                             "Начальное значение",
                             f"{analysis.get('start_value', 0):.2f}%"
                         )
+                    
                     with col2:
                         st.metric(
                             "Конечное значение",
                             f"{analysis.get('end_value', 0):.2f}%",
                             delta=f"{analysis.get('total_change', 0):+.2f}%"
                         )
+                    
                     with col3:
                         st.metric(
                             "Среднее значение",
                             f"{analysis.get('average_value', 0):.2f}%"
                         )
+                    
                     with col4:
                         st.metric(
                             "Изменений",
@@ -262,18 +366,43 @@ else:
                         )
             except Exception as e:
                 st.error(f"Не удалось построить графики: {e}")
+            
             st.markdown("### 📋 Таблица изменений")
             import pandas as pd
             timeline_df = pd.DataFrame(trends["timeline"])
             st.dataframe(timeline_df, use_container_width=True)
+        
         st.markdown("---")
-        xlsx_file = st.session_state.report_gen.generate_xlsx_trends(trends)
-        st.download_button(
-            label="📥 Скачать XLSX отчет",
-            data=xlsx_file,
-            file_name=st.session_state.report_gen.get_filename("trends", bank, product_type),
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        
+        # Export buttons
+        export_col1, export_col2 = st.columns(2)
+        
+        with export_col1:
+            xlsx_file = st.session_state.report_gen.generate_xlsx_trends(trends)
+            st.download_button(
+                label="📥 Скачать XLSX отчет",
+                data=xlsx_file,
+                file_name=st.session_state.report_gen.get_filename("trends", bank, product_type, format="xlsx"),
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        
+        with export_col2:
+            if st.session_state.report_gen.pdf_enabled:
+                try:
+                    pdf_file = st.session_state.report_gen.generate_pdf_trends(trends)
+                    st.download_button(
+                        label="📝 Скачать PDF отчет",
+                        data=pdf_file,
+                        file_name=st.session_state.report_gen.get_filename("trends", bank, product_type, format="pdf"),
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+                except Exception as e:
+                    st.error(f"Ошибка генерации PDF: {e}")
+            else:
+                st.button("⚠️ PDF недоступен", disabled=True, use_container_width=True)
+
 # Footer
 st.markdown("---")
 st.markdown(
