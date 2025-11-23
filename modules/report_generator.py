@@ -3,7 +3,7 @@ modules/report_generator.py - Generate XLSX, PDF and JSON reports with chart sup
 """
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List  # Add List here
 from datetime import datetime
 import pandas as pd
 from openpyxl import Workbook
@@ -547,7 +547,226 @@ class ReportGenerator:
         text = text.replace('\n', '<br/>')
         
         return text
-    
+    def generate_pdf_multibank(self, comparison_data: Dict[str, Any], banks: List[str]) -> BytesIO:
+        """Generate PDF report for multi-bank comparison"""
+        if not self.pdf_enabled:
+            raise RuntimeError("PDF generation requires reportlab library")
+
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage, PageBreak
+        from reportlab.lib.enums import TA_CENTER
+
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
+        elements = []
+        styles = getSampleStyleSheet()
+        
+        # Styles
+        title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=18, textColor=colors.HexColor('#366092'), alignment=TA_CENTER, spaceAfter=12)
+        heading_style = ParagraphStyle('CustomHeading', parent=styles['Heading2'], fontSize=14, textColor=colors.HexColor('#366092'), spaceAfter=8)
+        
+        # Title
+        elements.append(Paragraph("Мульти-банк сравнение продуктов", title_style))
+        elements.append(Paragraph(f"Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}", styles['Normal']))
+        elements.append(Spacer(1, 0.2*inch))
+
+        if comparison_data.get("llm_powered", False):
+            elements.append(Paragraph("🤖 <b>Сравнение сгенерировано с помощью LLM</b>", styles['Normal']))
+            elements.append(Spacer(1, 0.2*inch))
+
+        # Table
+        df = comparison_data.get("comparison_table")
+        if df is not None:
+            elements.append(Paragraph("📋 Сравнительная таблица", heading_style))
+            elements.append(Spacer(1, 0.1*inch))
+            
+            table_data = [df.columns.tolist()]
+            for row in df.values:
+                table_data.append([self._convert_value_for_excel(val) for val in row])
+            
+            table = Table(table_data, repeatRows=1)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#366092')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ]))
+            elements.append(table)
+            elements.append(Spacer(1, 0.3*inch))
+
+        # Insights
+        insights = comparison_data.get("insights", [])
+        if insights:
+            elements.append(Paragraph("💡 Ключевые выводы", heading_style))
+            for insight in insights:
+                clean_insight = self._clean_markdown_for_pdf(str(insight))
+                elements.append(Paragraph(f"• {clean_insight}", styles['Normal']))
+                elements.append(Spacer(1, 0.05*inch))
+            elements.append(Spacer(1, 0.2*inch))
+
+        # Advantages (Sber)
+        sber_adv = comparison_data.get("sber_advantages", [])
+        if sber_adv:
+             elements.append(Paragraph("✅ Преимущества Сбера", heading_style))
+             for adv in sber_adv:
+                 clean_adv = self._clean_markdown_for_pdf(str(adv))
+                 elements.append(Paragraph(clean_adv, styles['Normal']))
+                 elements.append(Spacer(1, 0.05*inch))
+             elements.append(Spacer(1, 0.2*inch))
+
+        # Competitor Highlights
+        highlights_dict = comparison_data.get("competitor_highlights", {})
+        if highlights_dict and banks:
+             elements.append(Paragraph("⚡ Сильные стороны конкурентов", heading_style))
+             for bank in banks:
+                 h_list = highlights_dict.get(bank, [])
+                 if h_list:
+                     elements.append(Paragraph(f"<b>{bank}</b>", styles['Normal']))
+                     for h in h_list:
+                         clean_h = self._clean_markdown_for_pdf(str(h))
+                         elements.append(Paragraph(f"- {clean_h}", styles['Normal']))
+                     elements.append(Spacer(1, 0.1*inch))
+
+        # Recommendation
+        rec = comparison_data.get("recommendation", "")
+        if rec:
+            elements.append(Spacer(1, 0.2*inch))
+            elements.append(Paragraph("🎯 Рекомендация", heading_style))
+            elements.append(Paragraph(self._clean_markdown_for_pdf(str(rec)), styles['Normal']))
+
+        # Chart
+        if self.charts_enabled and self.chart_generator:
+             try:
+                 elements.append(PageBreak())
+                 elements.append(Paragraph("📊 Визуализация", heading_style))
+                 fig = self.chart_generator.generate_comparison_chart(comparison_data)
+                 img_path = self._save_chart_temp(fig)
+                 if img_path:
+                     img = RLImage(img_path, width=5*inch, height=3.5*inch)
+                     elements.append(img)
+                     os.unlink(img_path)
+             except Exception as e:
+                 logger.error(f"Chart error: {e}")
+
+        doc.build(elements)
+        buffer.seek(0)
+        return buffer
+
+    def generate_xlsx_multibank(self, comparison_data: Dict[str, Any], banks: List[str]) -> BytesIO:
+        """Generate XLSX file for multi-bank comparison"""
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Сводная таблица"
+
+        # Title
+        ws['A1'] = "Мульти-банк сравнение продуктов"
+        ws['A1'].font = Font(size=14, bold=True)
+        ws.merge_cells('A1:E1')
+        
+        ws['A2'] = f"Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        ws.merge_cells('A2:E2')
+
+        # Comparison Table
+        comparison_df = comparison_data.get("comparison_table")
+        if comparison_df is not None:
+            # Headers
+            headers = comparison_df.columns
+            for c_idx, header in enumerate(headers, start=1):
+                cell = ws.cell(row=4, column=c_idx, value=str(header))
+                cell.font = Font(bold=True, color="FFFFFF")
+                cell.fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+            
+            # Data
+            for r_idx, row in enumerate(comparison_df.values, start=5):
+                for c_idx, value in enumerate(row, start=1):
+                    ws.cell(row=r_idx, column=c_idx, value=self._convert_value_for_excel(value))
+
+        # Analysis Sheet
+        analysis_ws = wb.create_sheet("Детальный анализ")
+        
+        # Insights
+        analysis_ws['A1'] = "Ключевые выводы"
+        analysis_ws['A1'].font = Font(size=12, bold=True)
+        current_row = 2
+        for insight in comparison_data.get("insights", []):
+            analysis_ws[f'A{current_row}'] = str(insight)
+            current_row += 1
+        
+        current_row += 2
+        
+        # Sber Advantages
+        analysis_ws[f'A{current_row}'] = "Преимущества Сбербанка"
+        analysis_ws[f'A{current_row}'].font = Font(size=12, bold=True)
+        current_row += 1
+        for adv in comparison_data.get("sber_advantages", []):
+            analysis_ws[f'A{current_row}'] = str(adv)
+            current_row += 1
+            
+        current_row += 2
+
+        # Competitor Highlights
+        analysis_ws[f'A{current_row}'] = "Сильные стороны конкурентов"
+        analysis_ws[f'A{current_row}'].font = Font(size=12, bold=True)
+        current_row += 1
+        
+        highlights = comparison_data.get("competitor_highlights", {})
+        for bank in banks:
+            bank_highlights = highlights.get(bank, [])
+            if bank_highlights:
+                analysis_ws[f'A{current_row}'] = f"--- {bank} ---"
+                analysis_ws[f'A{current_row}'].font = Font(bold=True)
+                current_row += 1
+                for h in bank_highlights:
+                    analysis_ws[f'A{current_row}'] = str(h)
+                    current_row += 1
+                current_row += 1
+
+        # Recommendation
+        current_row += 1
+        analysis_ws[f'A{current_row}'] = "Общая рекомендация"
+        analysis_ws[f'A{current_row}'].font = Font(size=12, bold=True)
+        current_row += 1
+        analysis_ws[f'A{current_row}'] = comparison_data.get("recommendation", "")
+        analysis_ws[f'A{current_row}'].alignment = Alignment(wrap_text=True)
+
+        # Charts (if enabled)
+        if self.charts_enabled and self.chart_generator:
+            try:
+                chart_ws = wb.create_sheet("Графики")
+                fig = self.chart_generator.generate_comparison_chart(comparison_data)
+                img_path = self._save_chart_temp(fig)
+                if img_path:
+                    img = XLImage(img_path)
+                    chart_ws.add_image(img, 'A1')
+                    os.unlink(img_path)
+            except Exception as e:
+                logger.error(f"Failed to add multibank chart: {e}")
+
+        # Auto-size columns
+        for sheet_name in wb.sheetnames:
+            worksheet = wb[sheet_name]
+            for col_idx, column in enumerate(worksheet.columns, start=1):
+                max_length = 0
+                column_letter = get_column_letter(col_idx)
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                worksheet.column_dimensions[column_letter].width = min(max_length + 2, 50)
+
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+        return output
+
     def generate_xlsx_trends(self, trends_data: Dict[str, Any]) -> BytesIO:
         """Generate XLSX file with trends analysis and charts"""
         
@@ -701,5 +920,9 @@ class ReportGenerator:
         
         if mode == "urgent":
             return f"сравнение_{bank}_{timestamp}.{format}"
+        elif mode == "multibank":
+            # Для мультибанка используем тип продукта в названии
+            return f"мультибанк_{product_type}_{timestamp}.{format}"
         else:
             return f"тренды_{bank}_{product_type}_{timestamp}.{format}"
+
